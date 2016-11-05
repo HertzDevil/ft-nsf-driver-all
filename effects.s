@@ -573,8 +573,8 @@ ft_vibrato:
 	clc
 	adc var_ch_VibratoDepth, x
 	tay
-	lda ft_vibrato_table, y		; add depth + 1
 	clc
+	lda ft_vibrato_table, y		; add depth + 1
 	adc #$01
 ;	clc
 	adc var_Temp16
@@ -601,6 +601,16 @@ ft_vibrato:
 @SkipN163:   ; if (ft_channel_type, x != CHAN_N163)
 .endif
 
+.ifdef USE_EXP
+    lda ft_channel_type, x
+    cmp #CHAN_N163
+    beq @Inverted
+    cmp #CHAN_VRC7
+    beq @Inverted
+    cmp #CHAN_FDS
+    beq @Inverted
+.endif
+
       ; TODO use ft_period_remove
 	sec
 	lda var_ch_PeriodCalcLo, x
@@ -609,9 +619,17 @@ ft_vibrato:
 	lda var_ch_PeriodCalcHi, x
 	sbc var_Temp16 + 1
 	sta var_ch_PeriodCalcHi, x
-
 	rts
 
+@Inverted:
+	clc
+	lda var_ch_PeriodCalcLo, x
+	adc var_Temp16
+	sta var_ch_PeriodCalcLo, x
+	lda var_ch_PeriodCalcHi, x
+	adc var_Temp16 + 1
+	sta var_ch_PeriodCalcHi, x
+    rts
 
 ; Tremolo calculation
 ;

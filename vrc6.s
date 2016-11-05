@@ -7,6 +7,15 @@ VRC6_CH2 = 5
 VRC6_CH3 = 6
 
 ft_update_vrc6:
+	lda var_PlayerFlags
+	bne @Play
+	lda #$00
+	sta $9002
+	sta $A002
+	sta $B002
+	rts
+@Play:
+
 	; Update Pulse 1
 	lda var_ch_Note + VRC6_CH1				; Kill channel if note = off
 	beq @KillChan1

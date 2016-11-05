@@ -6,6 +6,12 @@ MMC5_CH1 = 4
 MMC5_CH2 = 5
 
 ft_update_mmc5:
+	lda var_PlayerFlags
+	bne @Play
+	lda #$00
+	sta $5015
+	rts
+@Play:
 	; MMC5 Square 1
 	lda var_ch_Note + MMC5_CH1		; Kill channel if note = off
 	beq @KillSquare1

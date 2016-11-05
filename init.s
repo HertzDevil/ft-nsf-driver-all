@@ -36,6 +36,7 @@ ft_music_init:
 	sta var_Channels
 
 	sta var_ch_DPCM_EffPitch
+	sta var_ch_DPCMDAC
 
 	; Reset some variables for the wave channels
 	lda #$00
@@ -53,6 +54,17 @@ ft_music_init:
 
 	; DPCM
 	sta var_ch_NoteCut + (CHANNELS - 1)
+
+.ifdef USE_DPCM
+.ifdef USE_N163
+    ldx var_AllChannels
+    dex
+.else
+    ldx #DPCM_CHANNEL
+.endif
+    lda #$80
+    sta var_ch_Note, x
+.endif
 
 .ifdef USE_VRC6
     lda #$00
@@ -428,34 +440,32 @@ ft_load_frame:
 @SkipBankValues:
 .endif
 
+	lda #$00
+	sta var_Jump
+	sta var_Skip
+
 .ifdef ENABLE_ROW_SKIP
-	
 	lda var_SkipTo
-	beq @FirstRow
-	jmp ft_SkipToRow
-@FirstRow:
+	bne ft_SkipToRow
 	rts
-	
+;
 ; Skip to a certain row, this is NOT recommended in songs when CPU time is critical!!
 ;
 ft_SkipToRow:
-	pha									; Save row count
+	sta var_Pattern_Pos
 	ldx #$00							; x = channel
 @ChannelLoop:
-
-	pla	
+    lda var_Pattern_Pos
 	sta var_Temp2						; Restore row count
-	pha
-
 	lda #$00
 	sta var_ch_NoteDelay, x
 
 @RowLoop:
 	ldy #$00
 	lda var_ch_PatternAddrLo, x
-	sta var_Temp_Pointer
+	sta var_Temp_Pattern
 	lda var_ch_PatternAddrHi, x
-	sta var_Temp_Pointer + 1
+	sta var_Temp_Pattern + 1
 
 @ReadNote:
 	lda var_ch_NoteDelay, x				; First check if in the middle of a row delay
@@ -465,16 +475,16 @@ ft_SkipToRow:
 
 @NoRowDelay:
 	; Read a row
-	lda (var_Temp_Pointer), y
+	lda (var_Temp_Pattern), y
 	bmi @Effect
-	
+
 	lda var_ch_DefaultDelay, x
 	cmp #$FF
 	bne @LoadDefaultDelay
 	iny
-	lda (var_Temp_Pointer), y
-	iny	
-	
+	lda (var_Temp_Pattern), y
+	iny
+
 	sta var_ch_NoteDelay, x
 	jmp @RowIsDone
 @LoadDefaultDelay:
@@ -484,12 +494,12 @@ ft_SkipToRow:
 	; Save the new address
 	clc
 	tya
-	adc var_Temp_Pointer
+	adc var_Temp_Pattern
 	sta var_ch_PatternAddrLo, x
 	lda #$00
-	adc var_Temp_Pointer + 1
+	adc var_Temp_Pattern + 1
 	sta var_ch_PatternAddrHi, x
-	
+
 	dec var_Temp2						; Next row
 	bne @RowLoop
 
@@ -500,17 +510,14 @@ ft_SkipToRow:
     cpx #CHANNELS
 .endif
 	bne @ChannelLoop
-	
-	pla									; fix the stack	
-	clc
-	adc var_Pattern_Pos
-	sta var_Pattern_Pos
 	rts
-	
+
 @Effect:
-	cmp #$9E
+    cmp #$80
+    beq @LoadInstCmd
+	cmp #$B0                            ; Don't forget to update these!
 	beq @EffectDuration
-	cmp #$A0
+	cmp #$B2
 	beq @EffectNoDuration
 	pha
 	cmp #$8E							; remove pitch slide
@@ -519,7 +526,7 @@ ft_SkipToRow:
 	cmp #$F0							; See if volume
 	beq @OneByteCommand
 	cmp #$E0							; See if a quick instrument command
-	beq @OneByteCommand
+	beq @LoadInst
 	iny									; Command takes two bytes
 @OneByteCommand:						; Command takes one byte
 	iny
@@ -527,7 +534,7 @@ ft_SkipToRow:
 	jmp @ReadNote						; A new command or note is immediately following
 @EffectDuration:
 	iny
-	lda (var_Temp_Pointer), y
+	lda (var_Temp_Pattern), y
 	iny
 	sta var_ch_DefaultDelay, x
 	jmp @ReadNote
@@ -536,7 +543,20 @@ ft_SkipToRow:
 	lda #$FF
 	sta var_ch_DefaultDelay, x
 	jmp @ReadNote
+@LoadInstCmd:    ; mult-byte
+    iny
+	lda (var_Temp_Pattern), y
+	iny
+	jsr ft_load_instrument
+	jmp @ReadNote
+@LoadInst:       ; single byte
+	iny
+	pla
+	and #$0F
+	asl a
+	jsr ft_load_instrument
+	jmp @ReadNote
 
-.else
+.else   ; ENABLE_ROW_SKIP
 	rts
-.endif
+.endif  ; ENABLE_ROW_SKIP

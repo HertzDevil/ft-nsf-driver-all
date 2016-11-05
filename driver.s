@@ -1,6 +1,6 @@
 ;
 ; The NSF music driver for FamiTracker
-; Version 2.8
+; Version 2.9
 ; By jsr (zxy965r@tninet.se)
 ; assemble with ca65
 ;
@@ -10,7 +10,6 @@
 ;
 ;
 ; ToDo;
-;  - Namco
 ;  - Sunsoft
 ;  - Support for multiple chips
 ;
@@ -45,6 +44,9 @@ ENABLE_ROW_SKIP = 1		; Enable this to add code for seeking to a row > 0 when usi
 
 ;ENABLE_SFX = 1			; Enable this to enable sound effect support (not yet working)
 
+SPEED_SPLIT_POINT = 32  ; Speed/tempo split-point. Patched by the NSF exporter
+
+USE_EXP = 1             ; Enable expansion chips
 
 ;
 ; Constants
@@ -458,6 +460,7 @@ ft_channel_mask:
 ;
 
 .if .defined(USE_VRC6)
+
 ; VRC6
 ft_channel_map:
     .byte CHAN_2A03_PULSE1, CHAN_2A03_PULSE2, CHAN_2A03_TRIANGLE, CHAN_2A03_NOISE
@@ -469,6 +472,7 @@ ft_channel_type:
 	.byte CHAN_2A03
 
 .elseif .defined(USE_VRC7)
+
 ; VRC7
 ft_channel_map:
     .byte CHAN_2A03_PULSE1, CHAN_2A03_PULSE2, CHAN_2A03_TRIANGLE, CHAN_2A03_NOISE
@@ -480,6 +484,7 @@ ft_channel_type:
 	.byte CHAN_2A03
 
 .elseif .defined(USE_FDS)
+
 ; FDS
 ft_channel_map:
     .byte CHAN_2A03_PULSE1, CHAN_2A03_PULSE2, CHAN_2A03_TRIANGLE, CHAN_2A03_NOISE
@@ -491,6 +496,7 @@ ft_channel_type:
 	.byte CHAN_2A03
 
 .elseif .defined(USE_MMC5)
+
 ; MMC5
 ft_channel_map:
     .byte CHAN_2A03_PULSE1, CHAN_2A03_PULSE2, CHAN_2A03_TRIANGLE, CHAN_2A03_NOISE
@@ -502,6 +508,7 @@ ft_channel_type:
 	.byte CHAN_2A03
 
 .elseif .defined(USE_N163)
+
 ; N163
 ft_channel_map:
     .byte CHAN_2A03_PULSE1, CHAN_2A03_PULSE2, CHAN_2A03_TRIANGLE, CHAN_2A03_NOISE
@@ -513,9 +520,17 @@ ft_channel_type:
 	.byte CHAN_2A03
 
 .elseif .defined(USE_S5B)
+
 ; todo
+ft_channel_map:
+    .byte CHAN_2A03_PULSE1, CHAN_2A03_PULSE2, CHAN_2A03_TRIANGLE, CHAN_2A03_NOISE
+	.byte CHAN_2A03_DPCM
+ft_channel_type:
+    .byte CHAN_2A03, CHAN_2A03, CHAN_2A03, CHAN_2A03
+	.byte CHAN_2A03
 
 .else
+
 ; 2A03/2A07
 ft_channel_map:
     .byte CHAN_2A03_PULSE1, CHAN_2A03_PULSE2, CHAN_2A03_TRIANGLE, CHAN_2A03_NOISE, CHAN_2A03_DPCM
@@ -563,6 +578,15 @@ ft_music_addr:
 
     ; Include music
 .ifdef INC_MUSIC_ASM
+
+    .macro lb label
+        .byte (>label / $10) - 8
+    .endmacro
+
+    .macro l label
+        .word (label & $FFF) + $B000
+    .endmacro
+
     ; Included assembly file music, DPCM included
 	.include "music.asm"
 .else

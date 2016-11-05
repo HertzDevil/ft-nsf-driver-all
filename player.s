@@ -35,7 +35,7 @@ ft_music_play:
 	cpx #CHANNELS
 .endif
 	bne @ChanLoop
-	
+
 .ifdef USE_FDS
     jsr ft_check_fds_effects
 .endif
@@ -63,10 +63,6 @@ ft_do_row_update:
 	lda var_Current_Frame
 	jsr ft_load_frame
 @SkipFrameLoad:
-
-	lda #$00
-	sta var_Jump
-	sta var_Skip
 
 	; Read one row from all patterns
 	ldx #$00
@@ -572,7 +568,7 @@ ft_cmd_instrument:
 ft_cmd_speed:
 	jsr ft_get_pattern_byte
 conf_speed_patch:
-    cmp #$20                  ; This is patched by the exporter
+    cmp #SPEED_SPLIT_POINT                  ; This is patched by the exporter
 	bcc @SpeedIsTempo
 	sta var_Tempo
 	bcs @StoreDone
@@ -1054,9 +1050,16 @@ StoreDPCM:							; Special case for DPCM
 	tay
 	dey
 	dey
+	dey
 	lda (var_Temp16), y				; Read pitch
 	sta var_ch_SamplePitch
 	iny
+	lda var_ch_DPCMDAC
+	bpl :+
+    lda (var_Temp16), y             ; Read delta value
+	bmi :+
+	sta var_ch_DPCMDAC
+:	iny
 	lda (var_Temp16), y				; Read sample
 	tay
 

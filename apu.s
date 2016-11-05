@@ -254,8 +254,9 @@ ft_update_apu:
 	;
 	lda var_ch_Volume + 2
 	beq @KillTriangle
+    lda var_ch_VolColumn + 2
+	beq @KillTriangle
 	lda var_ch_Note + 2
-	;ora var_ch_Note + 2
 	beq @KillTriangle
 	lda #$81
 	sta $4008
@@ -344,7 +345,7 @@ ft_update_apu:
 	bne :+
 	rts                             ; Skip DPCM
 	;beq @Return
-:   
+:
 .ifdef USE_N163
     ldx var_AllChannels
     dex
