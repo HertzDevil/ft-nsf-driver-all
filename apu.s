@@ -3,7 +3,7 @@
 ;
 
 ft_update_apu:
-	lda var_Flags
+	lda var_PlayerFlags
 	bne @Play
 	lda #$00					; Kill all channels
 	sta $4015
@@ -19,6 +19,12 @@ ft_update_apu:
 	;
 	; Square 1
 	;
+	lda var_Channels
+	and #$01
+	bne :+
+	jmp @Square2
+:
+	
 	lda var_ch_Note				; Kill channel if note = off
 	beq @KillSquare1
 	; Calculate volume	
@@ -92,6 +98,12 @@ ft_update_apu:
 	; Square 2
 	;
 @Square2:
+	lda var_Channels
+	and #$02
+	bne :+
+	jmp @Triangle
+:
+	
 	lda var_ch_Note + 1
 	beq @KillSquare2
 	; Calculate volume	
@@ -156,14 +168,18 @@ ft_update_apu:
 @KillSquare2:
 	lda #$30
 	sta $4004
-@Triangle:
 
+@Triangle:
+	lda var_Channels
+	and #$04
+	beq @Noise
 	;
 	; Triangle
 	;
 	lda var_ch_Volume + 2
 	beq @KillTriangle
-	lda var_ch_Note + 2
+	;lda var_ch_Note + 2
+	ora var_ch_Note + 2
 	beq @KillTriangle
 	lda #$81
 	sta $4008
@@ -191,6 +207,11 @@ ft_update_apu:
 	;
 	; Noise
 	;
+@Noise:
+	lda var_Channels
+	and #$08
+	beq @DPCM
+		
 	lda var_ch_Note + 3
 	beq @KillNoise
 	; Calculate volume	
@@ -227,10 +248,14 @@ ft_update_apu:
 	lda #$30
 	sta $400C
 @DPCM:
-
 	;
 	; DPCM
 	;
+.ifdef USE_DPCM
+	lda var_Channels
+	and #$10
+	beq @Return
+	
 	lda var_ch_DPCMDAC				; See if delta counter should be updated
 	bmi @SkipDAC
 	sta $4011
@@ -267,6 +292,8 @@ ft_update_apu:
 @KillDPCM:
 	lda #$0F
 	sta $4015
+.endif
+@Return:
 	rts
 
 ; Lookup table

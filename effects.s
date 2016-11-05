@@ -424,5 +424,9 @@ ft_tremolo:
 	sec
 	lda var_ch_Volume, x
 	sbc var_Temp
+	bmi :+
+	sta var_ch_OutVolume, x
+	rts
+:	lda #$00
 	sta var_ch_OutVolume, x
 	rts

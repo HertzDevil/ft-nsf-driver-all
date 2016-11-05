@@ -166,115 +166,127 @@ ft_run_sequence:
 ; Reset instrument sequences
 ;	
 ft_reset_instrument:
-	cpx #DPCM_CHANNEL
-	beq @Return						; Skip when DPCM
 	lda #$00
 	sta var_ch_SequencePtr1, x
 	sta var_ch_SequencePtr2, x
 	sta var_ch_SequencePtr3, x
 	sta var_ch_SequencePtr4, x
 	sta var_ch_SequencePtr5, x
-@Return:
 	rts
 
-; Loads a 16-bit address
-;
-ft_get_sequence_address:
-	lda (var_Temp_Pointer), y				; See if there's an sequence for this address
-	iny
-	ora (var_Temp_Pointer), y
-	beq @SkipSequence
-	dey
-	clc										; Not empty, load address to sequenec
-	lda (var_Temp_Pointer), y
-	adc ft_music_addr
-	sta var_Temp16
-	iny
-	lda (var_Temp_Pointer), y
-	adc ft_music_addr + 1
-	sta var_Temp16 + 1
-	iny
-	rts
-@SkipSequence:								; Just load zero so it'll be skipped later
-;	dey
-	lda #$0
-	sta var_Temp16
-	sta var_Temp16 + 1
-	iny
-	rts
 
 ; Load the instrument in A for channel X (Y must be saved)
+;
+; Optimize
 ;
 ft_load_instrument:
 	sty var_Temp
 	ldy #$00
-	; Load the address for selected instrument
+
+	; Instrument_pointer_list + a => instrument_address
+	; instrument_address + ft_music_addr => instrument_data
+
+	; Get the instrument data pointer
 	clc
 	adc var_Instrument_list
-	sta var_Temp_Pointer
+	sta var_Temp16
 	tya
 	adc var_Instrument_list + 1
-	sta var_Temp_Pointer + 1
+	sta var_Temp16 + 1
 	clc
-	ldy #$00
-	lda (var_Temp_Pointer), y		; Load a
+
+	; Get the specified instrument
+	lda (var_Temp16), y
 	adc ft_music_addr
-	pha
+	sta var_Temp_Pointer
 	iny
-	lda (var_Temp_Pointer), y		; Load a
+	lda (var_Temp16), y
 	adc ft_music_addr + 1
 	sta var_Temp_Pointer + 1
-	pla
-	sta var_Temp_Pointer
-	
-	; var_Temp_Pointer is now pointing to the selected instrument in memory
-	; Data there is ordered as 
-	; { 2 bytes pointing to volume }
-	; { 2 bytes pointing to arpeggio }
-	; ...
-	
-	;
-	;
-	; Optimize the part below
-	;
-	;
-	
-	ldy #$00
-	
-	; Load sequence numbers
-	jsr ft_get_sequence_address		; Volume
-	lda var_Temp16
-	sta var_ch_SeqVolume, x
-	lda var_Temp16 + 1
-	sta var_ch_SeqVolume + WAVE_CHANS, x
 
-	jsr ft_get_sequence_address		; Arpeggio
-	lda var_Temp16
+	; var_Temp_Pointer points to instrument data
+	ldy #$00
+	tya
+	sta var_ch_SeqVolume, x
+	sta var_ch_SeqVolume + WAVE_CHANS, x
 	sta var_ch_SeqArpeggio, x
-	lda var_Temp16 + 1
 	sta var_ch_SeqArpeggio + WAVE_CHANS, x
-		
-	jsr ft_get_sequence_address		; Pitch
-	lda var_Temp16
 	sta var_ch_SeqPitch, x
-	lda var_Temp16 + 1
 	sta var_ch_SeqPitch + WAVE_CHANS, x
-	
-	jsr ft_get_sequence_address		; Hi-pitch
-	lda var_Temp16
 	sta var_ch_SeqHiPitch, x
-	lda var_Temp16 + 1
 	sta var_ch_SeqHiPitch + WAVE_CHANS, x
-	
-	jsr ft_get_sequence_address		; Duty cycle
-	lda var_Temp16
 	sta var_ch_SeqDutyCycle, x
-	lda var_Temp16 + 1
 	sta var_ch_SeqDutyCycle + WAVE_CHANS, x
-	
-	; Reset positions
+
+	; Read instrument data
+	lda (var_Temp_Pointer), y		; Read mod switch
+	sta var_Temp2
+	iny
+
+	; Volume
+	ror var_Temp2
+	bcc	:+
+	clc
+	lda (var_Temp_Pointer), y
+	adc ft_music_addr
+	sta var_ch_SeqVolume, x
+	iny
+	lda (var_Temp_Pointer), y
+	adc ft_music_addr + 1
+	sta var_ch_SeqVolume + WAVE_CHANS, x
+	iny
+: 	; Arpeggio
+	ror var_Temp2
+	bcc	:+
+	clc
+	lda (var_Temp_Pointer), y
+	adc ft_music_addr
+	sta var_ch_SeqArpeggio, x
+	iny
+	lda (var_Temp_Pointer), y
+	adc ft_music_addr + 1
+	sta var_ch_SeqArpeggio + WAVE_CHANS, x
+	iny
+:	; Pitch
+	ror var_Temp2
+	bcc	:+
+	clc
+	lda (var_Temp_Pointer), y
+	adc ft_music_addr
+	sta var_ch_SeqPitch, x
+	iny
+	lda (var_Temp_Pointer), y
+	adc ft_music_addr + 1
+	sta var_ch_SeqPitch + WAVE_CHANS, x
+	iny
+:	; Hi-Pitch
+	ror var_Temp2
+	bcc	:+
+	clc
+	lda (var_Temp_Pointer), y
+	adc ft_music_addr
+	sta var_ch_SeqHiPitch, x
+	iny
+	lda (var_Temp_Pointer), y
+	adc ft_music_addr + 1
+	sta var_ch_SeqHiPitch + WAVE_CHANS, x
+	iny
+:	; Duty cycle
+	ror var_Temp2
+	bcc	:+
+	clc
+	lda (var_Temp_Pointer), y
+	adc ft_music_addr
+	sta var_ch_SeqDutyCycle, x
+	iny
+	lda (var_Temp_Pointer), y
+	adc ft_music_addr + 1
+	sta var_ch_SeqDutyCycle + WAVE_CHANS, x
+	iny
+:
 	jsr ft_reset_instrument
 	ldy var_Temp
+	
 	rts
 
 ; Make sure the frequency doesn't exceed max or min

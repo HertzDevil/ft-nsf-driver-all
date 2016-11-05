@@ -4,10 +4,10 @@
 ; The player routine
 ;
 ft_music_play:
-	lda var_Flags						; Skip if player is disabled
-	bne @Play
-	rts
-@Play:
+	lda var_PlayerFlags					; Skip if player is disabled
+	bne :+
+	rts									; Not playing, return
+:
 	; Run delayed channels
 	ldx #$00
 @ChanLoop:
@@ -50,12 +50,11 @@ ft_do_row_update:
 ft_read_channels:
 @UpdateChan:
 	lda var_ch_Delay, x
-	beq @JustRead
+	beq :+
 	lda #$00
 	sta var_ch_Delay, x
-	jsr ft_read_pattern					; Delay duration was too long
-@JustRead:
-	jsr ft_read_pattern					; Get new notes
+	jsr ft_read_pattern
+:	jsr ft_read_pattern					; Get new notes
 	inx
 	cpx #CHANNELS
 	bne ft_read_channels
@@ -154,6 +153,10 @@ ft_loop_channels:
 .ifdef USE_VRC6
 	jsr	ft_update_vrc6
 .endif
+.ifdef USE_MMC5
+	jsr	ft_update_mmc5
+.endif
+
 	; End of music routine, return
 	rts
 	
@@ -165,14 +168,15 @@ ft_read_pattern:
 	dec var_ch_NoteDelay, x				; Decrease one
 	rts									; And skip
 @NoRowDelay:
-	sta var_Sweep
-	tay
+	sta var_Sweep						; A = 0
+	tay									; Y = 0
+.ifdef USE_BANKSWITCH
 	; First setup the bank
 	lda var_ch_Bank, x
-	beq @NoBank
+	beq :+
 	sta $5FFB							; Will always be the last bank before DPCM
-@NoBank:
-	; Go on
+:	; Go on
+.endif
 	lda #$0F
 	sta var_VolTemp
 	lda var_ch_Pattern_addr, x			; Load pattern address
@@ -182,24 +186,22 @@ ft_read_pattern:
 	
 ft_read_note:
 	lda (var_Temp_Pattern), y
-	bmi @Effect
-	;cmp #$7F							; was $00 before
-	beq @JumpToDone	
-	cmp #$7F							; Note off
-	beq @NoteOff
+	bmi @Effect							; Effect
+	beq @JumpToDone						; Rest
+	cmp #$7F							
+	beq @NoteOff						; Note off
 	;cmp #$7E
 	;beq 								; Note release
 	; A real note
-;	sec
-;	sbc #$01
 	sta var_ch_Note, x					; Note on
 	jsr ft_translate_freq
-	jsr ft_reset_instrument
+.ifdef USE_DPCM
 	cpx #DPCM_CHANNEL					; Break here if DPCM
-	;beq @ReadIsDone
-	bne @NotLastChan
+	bne :+	
 	jmp @ReadIsDone
-@NotLastChan:
+:	; DPCM skip
+.endif
+	jsr ft_reset_instrument
 	lda var_VolTemp
 	sta var_ch_Volume, x
 	lda #$00
@@ -223,18 +225,19 @@ ft_read_note:
 	jmp @ReadIsDone
 @NoteOff:
 	lda #$00
-	sta var_ch_Note, x	
-	cpx #$04							; Skip DPCM
-	beq @SkipMoreOff
+	sta var_ch_Note, x
+.ifdef USE_DPCM
+	cpx #DPCM_CHANNEL					; Skip DPCM
+	beq :+
+.endif
 	sta var_ch_Volume, x
 	sta var_ch_PortaTo, x
 	sta var_ch_PortaTo + WAVE_CHANS, x
 	cpx #$02							; Skip all over square channels
-	bcs @SkipMoreOff
+	bcs :+
 	lda #$FF
 	sta var_ch_PrevFreqHigh, x
-@SkipMoreOff:
-	jmp @ReadIsDone
+:	jmp @ReadIsDone
 @VolumeCommand:							; Handle volume
 	pla
 	asl a
@@ -273,7 +276,7 @@ ft_read_note:
 	jmp (var_Temp_Pointer)				; And jump there
 @LoadDefaultDelay:
 	sta var_ch_NoteDelay, x				; Store default delay
-	jmp @StoraPatternAddr
+	jmp ft_read_is_done
 @ReadIsDone:
 	lda var_ch_DefaultDelay, x			; See if there's a default delay
 	cmp #$FF
@@ -281,7 +284,6 @@ ft_read_note:
 	iny
 	lda (var_Temp_Pattern), y			; A note is immediately followed by the amount of rows until next note
 	sta var_ch_NoteDelay, x
-@StoraPatternAddr:						; <--- combine these labels
 ft_read_is_done:
 	clc									; Store pattern address
 	iny
@@ -291,6 +293,9 @@ ft_read_is_done:
 	lda #$00
 	adc var_Temp_Pattern + 1
 	sta var_ch_Pattern_addr + CHANNELS, x
+	
+	
+	;rts
 	lda var_Sweep						; Check sweep
 	beq @EndPatternFetch
 	sta var_ch_Sweep, x					; Store sweep, only used for square 1 and 2
@@ -335,10 +340,56 @@ ft_command_table:
 	.word ft_cmd_vol_slide
 	.word ft_cmd_duration
 	.word ft_cmd_noduration
+;	.word ft_cmd_expand
 
 ;
 ; Command functions
 ;
+
+.if 0
+; Loop expansion
+ft_cmd_expand:
+	lda var_ch_LoopCounter, x	; See if already looping
+	bne :+
+	; Load new loop
+	jsr ft_get_pattern_byte		; number of loops
+	sta var_ch_LoopCounter, x
+	jsr ft_get_pattern_byte		; length in bytes
+	sta var_Temp
+	; Calculate pattern pointer
+	sec
+	lda var_Temp_Pattern
+	sbc var_Temp
+	sta var_Temp_Pattern
+	lda var_Temp_Pattern + 1
+	sbc #$00
+	sta var_Temp_Pattern + 1
+	ldy #$00
+	jmp ft_read_note
+:	; Already looping
+	sec
+	sbc #$01
+	beq :+						; Check if done
+	sta var_ch_LoopCounter, x
+	iny							; number of loops, ignore
+	jsr ft_get_pattern_byte		; length in bytes
+	sta var_Temp
+	; Calculate pattern pointer
+	sec
+	lda var_Temp_Pattern
+	sbc var_Temp
+	sta var_Temp_Pattern
+	lda var_Temp_Pattern + 1
+	sbc #$00
+	sta var_Temp_Pattern + 1
+	ldy #$00
+	jmp ft_read_note
+:	; Loop is done
+	sta var_ch_LoopCounter, x
+	iny							; number of loops, ignore
+	iny							; length in bytes, ignore
+	jmp ft_read_note
+.endif
 
 ; Change instrument
 ft_cmd_instrument:
@@ -371,7 +422,7 @@ ft_cmd_skip:
 ft_cmd_halt:
 	jsr ft_get_pattern_byte
 	lda #$00
-	sta var_Flags
+	sta var_PlayerFlags
 	jmp ft_read_note
 ; Effect: Volume (Exx)
 ft_cmd_effvolume:
@@ -464,20 +515,14 @@ ft_cmd_pitch:
 ft_cmd_delay:
 	jsr ft_get_pattern_byte
 	sta var_ch_Delay, x
-	; If last pattern row, read note directly
-;	lda var_Pattern_Pos					; See if end is reached
-;	cmp var_Pattern_Length	
-;	beq	@Continue
 	dey
 	jmp ft_read_is_done
-;@Continue:
-;	lda #$00
-;	sta var_ch_Delay, x
-;	jmp ft_read_note	
 ; Effect: delta counter setting (Zxx)
 ft_cmd_dac:
 	jsr ft_get_pattern_byte
+.ifdef USE_DPCM
 	sta var_ch_DPCMDAC
+.endif
 	jmp ft_read_note
 ; Effect: Duty cycle
 ft_cmd_duty:
@@ -494,7 +539,9 @@ ft_cmd_duty:
 ; Effect: Sample offset
 ft_cmd_sample_offset:
 	jsr ft_get_pattern_byte
+.ifdef USE_DPCM
 	sta var_ch_DPCM_Offset
+.endif
 	jmp ft_read_note
 ; Effect: Slide pitch up
 ft_cmd_slide_up:	
@@ -580,8 +627,11 @@ ft_translate_freq:
 
 	cpx #NOISE_CHANNEL				; Check if noise
 	beq StoreNoise
+
+.ifdef USE_DPCM
 	cpx #DPCM_CHANNEL				; Check if DPCM
 	beq StoreDPCM
+.endif
 	
 .ifdef USE_VRC6
 	jsr	ft_load_vrc6_saw_table
@@ -617,7 +667,10 @@ ft_translate_freq:
 StoreNoise:							; Special case for noise
 	sta var_ch_TimerPeriod, x
 	rts
+
+.ifdef USE_DPCM
 StoreDPCM:							; Special case for DPCM
+	
 	pha
 	lda var_dpcm_inst_list			; Optimize this maybe?
 	sta var_Temp16
@@ -646,6 +699,7 @@ StoreDPCM:							; Special case for DPCM
 	
 	ldy var_Temp
 	rts
+.endif
 
 .ifdef USE_VRC6
 StoreSawtooth:

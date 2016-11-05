@@ -7,17 +7,6 @@
 ;
 ft_music_init:
 	asl a
-	pha			; Save song number
-	; Clear music variables to zero
-	; Remember this will fail if number of bytes exceeds 256
-	lda #$00
-	sta var_Temp2
-	ldy #<last_bss_var
-@ClearLoop:
-	sta var_Song_list, y		; <- has to be the first variable in RAM
-	dey
-	bne @ClearLoop
-	pla			; Restore song number
 	jsr ft_load_song
 	; Kill APU registers
 	lda #$00
@@ -42,10 +31,19 @@ ft_music_init:
 	sta $4017
 	lda #$40
 	sta $4017		; Disable frame IRQs	
+
+	lda #$FF		; Enable all channels
+	sta var_Channels
+
+.ifdef USE_MMC5
+	lda #$03
+	sta $5015		; Enable channels
+.endif
+		
 	rts
 
 ;
-; Prepare the player for the song
+; Prepare the player with a song
 ;
 ; NSF music data header:
 ;
@@ -62,7 +60,7 @@ ft_load_song:
 	lda ft_music_addr + 1
 	sta var_Temp_Pointer + 1
 	
-	; Read the header
+	; Read the header and store in RAM
 	ldy #$00
 @LoadAddresses:
 	clc
@@ -75,9 +73,17 @@ ft_load_song:
 	sta var_Song_list, y
 	iny
 	cpy #$08							; 4 items
-	bne @LoadAddresses	
-	cpx #$01
+	bne @LoadAddresses
+
+;	lda #$0
+;	sta var_SongFlags
+	lda (var_Temp_Pointer), y			; Flags, 1 byte
+	sta var_SongFlags
+	iny
+	
+	cpx #$01							; PAL / NTSC flag
 	beq @LoadPAL
+ .ifdef NTSC_PERIOD_TABLE
 	; Load NTSC speed divider and frequency table
 	lda (var_Temp_Pointer), y
 	iny
@@ -89,8 +95,10 @@ ft_load_song:
 	sta var_Note_Table
 	lda #>ft_notes_ntsc
 	sta var_Note_Table + 1
-	jmp @LoadDone	
- @LoadPAL:
+.endif
+	jmp @LoadDone
+@LoadPAL:
+.ifdef PAL_PERIOD_TABLE
 	; Load PAL speed divider and frequency table
 	iny
 	iny
@@ -104,6 +112,7 @@ ft_load_song:
 	sta var_Note_Table
 	lda #>ft_notes_pal
 	sta var_Note_Table + 1
+.endif
  @LoadDone:
 	pla
 	tay
@@ -113,13 +122,15 @@ ft_load_song:
 	; Clear out variables to zero
 	; Important!
 	ldx #$01
-	stx var_Flags
+	stx var_PlayerFlags				; Player flags, bit 0 = playing
 	dex
 @ClearChannels2:					; This clears the first four channels
 	lda #$7F
 	sta var_ch_VolColumn, x
 	lda #$80
 	sta var_ch_FinePitch, x
+	lda #$00
+	sta var_ch_Note, x
 	inx
 	cpx #(CHANNELS - 1)
 	bne @ClearChannels2
@@ -127,6 +138,11 @@ ft_load_song:
 	ldx #$FF
 	stx var_ch_PrevFreqHigh			; Set prev freq to FF for Sq1 & 2
 	stx var_ch_PrevFreqHigh + 1
+	
+.ifdef USE_MMC5
+	stx var_ch_PrevFreqHighMMC5
+	stx var_ch_PrevFreqHighMMC5 + 1
+.endif 
 	
 	inx								; Jump to the first frame
 	stx var_Current_Frame
@@ -196,13 +212,13 @@ ft_load_track:
 ; Load the frame in A for all channels
 ;
 ft_load_frame:
-
+.ifdef USE_BANKSWITCH
 	pha
 	lda var_InitialBank
-	beq @SkipBankSwitch
+	beq :+
 	sta $5FFB
-@SkipBankSwitch:
-	pla
+:	pla
+.endif
 
 	; Get the entry in the frame list
 	asl A					; Multiply by two
@@ -235,17 +251,33 @@ ft_load_frame:
 	adc ft_music_addr + 1
 	sta var_ch_Pattern_addr + CHANNELS, x
 	iny
-	lda (var_Temp_Pointer), y			; Pattern bank number 
-	sta var_ch_Bank, x
-	iny
 	lda #$00
 	sta var_ch_NoteDelay, x
 	sta var_ch_Delay, x
+	sta var_ch_LoopCounter, x
 	lda #$FF
 	sta var_ch_DefaultDelay, x
 	inx
 	cpx #CHANNELS
 	bne @LoadPatternAddr
+; Bankswitch values
+.ifdef USE_BANKSWITCH
+	lda var_SongFlags					; Check bankswitch flag
+	and #$01
+	beq @SkipBankValues					; Skip if no bankswitch info is stored
+	ldx #$00
+@LoadBankValues:
+	lda (var_Temp_Pointer), y			; Pattern bank number 
+	sta var_ch_Bank, x
+	iny
+	inx
+	cpx #CHANNELS
+	bne @LoadBankValues
+@SkipBankValues:
+.endif
+
+.ifdef ENABLE_SKIP_ROWS
+	
 	lda var_Temp2
 	beq @FirstRow
 	jmp ft_SkipToRow
@@ -265,7 +297,7 @@ ft_SkipToRow:
 
 	lda #$00
 	sta var_ch_NoteDelay, x
-		
+	
 @RowLoop:
 	ldy #$00
 	lda var_ch_Pattern_addr, x
@@ -293,13 +325,10 @@ ft_SkipToRow:
 	
 	sta var_ch_NoteDelay, x
 	jmp @RowIsDone
-	
 @LoadDefaultDelay:
 	iny
 	sta var_ch_NoteDelay, x				; Store default delay
-	
 @RowIsDone:
-	
 	; Save the new address
 	clc
 	tya
@@ -351,4 +380,7 @@ ft_SkipToRow:
 	lda #$FF
 	sta var_ch_DefaultDelay, x
 	jmp @ReadNote
-	
+
+.else
+	rts	
+.endif
