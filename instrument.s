@@ -137,6 +137,12 @@ ft_update_channel:
 	jsr ft_run_sequence
 	sta var_ch_SequencePtr5, x
 	lda var_sequence_result
+	pha
+	lda var_ch_DutyCycle, x
+	and #$F0
+	sta var_ch_DutyCycle, x
+	pla
+	ora var_ch_DutyCycle, x
 	sta var_ch_DutyCycle, x
 	; Save pitch
 @SkipDutyUpdate:
@@ -381,10 +387,10 @@ ft_load_instrument:
 	; Read VRC7 instrument
 	ldy #$00
 	lda (var_Temp_Pointer), y		; Load patch number
-	sta var_ch_Patch - VRC7_CHANNEL, x			; vrc7 channel offset
+	sta var_ch_vrc7_Patch - VRC7_CHANNEL, x			; vrc7 channel offset
 	bne :++							; Skip custom settings if patch > 0
 	lda var_Temp_Inst
-	cmp var_ch_CustomPatch			; Check if it's the same custom instrument
+	cmp var_ch_vrc7_CustomPatch			; Check if it's the same custom instrument
 	beq :++							; Skip if it is
 	; Load custom instrument regs
 	txa
@@ -400,7 +406,7 @@ ft_load_instrument:
 	pla
 	tax
 	lda var_Temp_Inst
-	sta var_ch_CustomPatch
+	sta var_ch_vrc7_CustomPatch
 : 	;jmp @Return
 	ldy var_Temp
 	rts

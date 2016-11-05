@@ -1,48 +1,40 @@
-
-ft_translate_note_vrc7:
-	
-	; Calculate Fnum & Bnum
-	
-	; Input: A = note + 1
-	; Result: EXT = Fnum index, ACC = Bnum
-
-;	sec
-;	sbc #$01
-	sta ACC
-	
-	lda #12
-	sta AUX
-
-	lda #$00
-	sta ACC + 1
-	sta AUX + 1
-
-	jsr DIV
-
-	;lda ACC
-	;asl a
-	;sta ACC
-;	asl ACC
-
-	rts
-
 ; VRC7 commands
 ;  0 = halt
 ;  1 = trigger
 ;  80 = update
+
+VRC7_HALT = $00
+VRC7_TRIGGER = $01
+VRC7_HOLD_NOTE = $80
+
+
+ft_translate_note_vrc7:
+	; Calculate Fnum & Bnum
+	; Input: A = note + 1
+	; Result: EXT = Fnum index, ACC = Bnum
+	sta ACC
+	lda #12
+	sta AUX
+	lda #$00
+	sta ACC + 1
+	sta AUX + 1
+	jsr DIV
+	rts
 
 ft_clear_vrc7:
 	clc
 	txa
 	adc #$20	; $20: Clear channel
 	sta $9010
+	jsr ft_vrc7_delay
 	lda var_Period + 1
-	;	lda #$00
-	ora var_ch_Bnum, x
-	sta $9030	
+	ora var_ch_vrc7_Bnum, x
+	sta $9030
+	jsr ft_vrc7_delay
 	rts
 
-; Update all VRC7 channels
+; Update all VRC7 channel registers
+;
 ft_update_vrc7:
 
 	lda var_PlayerFlags
@@ -53,8 +45,10 @@ ft_update_vrc7:
 	clc
 	adc #$1F
 	sta $9010
+	jsr ft_vrc7_delay
 	lda #$00
 	sta $9030
+	jsr ft_vrc7_delay
 	dex
 	bne :-
 	rts
@@ -62,180 +56,129 @@ ft_update_vrc7:
 
 	ldx #$00					; x = channel
 @LoopChannels:
-
 .if 0
-	lda var_ch_Command, x
-	bne :+
-	; Kill channel
-	jsr ft_vrc7_effects
+    ; See if updating
+	lda var_ch_vrc7_Command, x
+	cmp #VRC7_HOLD_NOTE
+	beq @UpdateChannel
+
+	; Clear channel, this also serves as a retrigger
 	jsr ft_clear_vrc7
-	jmp @NextChan
-:
+
+	; Halt, quit
+	lda var_ch_vrc7_Command, x
+	cmp #VRC7_HALT
+	beq @NextChan
+
+	; Trigger, change to hold note
+	lda #VRC7_HOLD_NOTE
+	sta var_ch_vrc7_Command, x
 .endif
 
-	lda var_ch_Command, x
-	beq @UpdateChannel
-	
-	; Retrigger channel
-	lda var_ch_ActiveNote, x
-	jsr ft_translate_note_vrc7
-	ldy EXT	; note index -> y
-
-	lda ft_note_table_vrc7_l, y
-	sta var_ch_Fnum, x
-	lda ft_note_table_vrc7_h, y
-	sta var_ch_Fnum + 6, x
-
-;	lda ACC
-;	sta var_ch_Bnum, x
-	
-	lda var_ch_Command, x
-	bmi @UpdateChannel				; Jump if command = 80
-
-	; Retrigger channel
-	jsr ft_clear_vrc7
-
-;	lda var_ch_Command
-;	beq @UpdateChannel
-	lda #$80
-	sta var_ch_Command, x
-
-@UpdateChannel:	
-
-	;jsr ft_vrc7_effects
-
-	; Load VRC7 Fnum value and shift down two steps
-	lda var_ch_Effect + VRC7_CHANNEL, x
-	cmp #EFF_PORTAMENTO
+    ; Check note off
+	lda var_ch_Note + VRC7_CHANNEL, x
 	bne :+
-	lda var_ch_EffParam + VRC7_CHANNEL, x
-	beq :+
-	lda var_ch_TimerPeriod + VRC7_CHANNEL, x
-	cmp var_ch_PortaTo + VRC7_CHANNEL, x
-	bne :+
-	lda var_ch_TimerPeriod + VRC7_CHANNEL + EFF_CHANS, x
-	cmp var_ch_PortaTo + VRC7_CHANNEL + EFF_CHANS, x
-	bne :+
-	jsr ft_vrc7_get_freq_only
+	lda #VRC7_HALT
+	sta var_ch_vrc7_Command, x
 :
 
+    ; See if retrigger is needed
+	lda var_ch_vrc7_Command, x
+	cmp #VRC7_TRIGGER
+	bne @UpdateChannel
+
+
+	; Clear channel, this also serves as a retrigger
+	jsr ft_clear_vrc7
+
+	; Remove trigger command
+ 	lda #VRC7_HOLD_NOTE
+	sta var_ch_vrc7_Command, x
+
+@UpdateChannel:
+    ; Load period
 	lda var_ch_TimerCalculated + VRC7_CHANNEL, x
 	sta var_Period
 	lda var_ch_TimerCalculated + VRC7_CHANNEL + EFF_CHANS, x
+	and #$07
 	sta var_Period + 1
 
+.if 0
+	; Divide by 2
 	lsr var_Period + 1
 	ror var_Period
 	lsr var_Period + 1
 	ror var_Period
+.endif
+	;cpx #$02
+	;bne :+
+;	brk
+;:
 
 	clc
 	txa
 	adc #$10	; $10: Low part of Fnum
 	sta $9010
+	jsr ft_vrc7_delay
 	lda var_Period
 	sta $9030
+	jsr ft_vrc7_delay
 
 	; Note on or off
 	lda #$00
 	sta var_Temp2
-	lda var_ch_Command, x
+	; Skip if halt
+	lda var_ch_vrc7_Command, x
 	beq :+
+
 	; Check release
 	lda var_ch_State + VRC7_CHANNEL, x
 	and #$01
 	tay
 	lda ft_vrc7_cmd, y
 	sta var_Temp2
-:
-	clc
+
+:	clc
 	txa
 	adc #$20	; $20: High part of Fnum, Bnum, Note on & sustain on
 	sta $9010
-	lda var_ch_Bnum, x
+	jsr ft_vrc7_delay
+	lda var_ch_vrc7_Bnum, x
 	asl a
 	ora var_Period + 1
-	;ora #$30	; Note on | sustain on
 	ora var_Temp2
 	sta $9030
+	jsr ft_vrc7_delay
+
+;	brk
 
 	clc
 	txa
 	adc #$30	; $30: Patch & Volume
 	sta $9010
+	jsr ft_vrc7_delay
 	lda var_ch_VolColumn + VRC7_CHANNEL, x
 	lsr a
 	lsr a
 	lsr a
 	eor #$0F
-	ora var_ch_Patch, x
+	ora var_ch_vrc7_Patch, x
 	sta $9030
-	
-	; Leave channel on
-;	lda var_ch_Command, x
-;	beq @NextChan
-;	lda #$80
-;	sta var_ch_Command, x
-	
+	jsr ft_vrc7_delay
+
 @NextChan:
 	inx
 	cpx #$06
 	beq :+
 	jmp @LoopChannels
-:
-	rts
+:	rts
 
-; Update vrc7 channel effects, and load frequency -> var_Period
-ft_vrc7_effects:
-	.if 0
-	lda #$00
-	sta var_Temp16
-	sta var_Temp16 + 1
-
-	txa
-	clc
-	adc #VRC7_CHANNEL
-	tax
-	jsr ft_vibrato
-	txa
-	sec
-	sbc #VRC7_CHANNEL
-	tax
-
-	; Vibrato
-	lda var_ch_Fnum, x
-	sec
-	sbc var_Temp16
-	sta var_Period
-	lda var_ch_Fnum + 6, x
-	sbc var_Temp16 + 1
-	sta var_Period + 1
-;.if 0
-	; Fine pitch
-	lda var_Period
-	clc
-	adc var_ch_FinePitch + VRC7_CHANNEL, x
-	sta var_Period
-	lda var_Period + 1
-	adc #$00
-	sta var_Period + 1
-	lda var_Period
-	sec
-	sbc #$80
-	sta var_Period
-	lda var_Period + 1
-	sbc #$00
-	sta var_Period + 1
-;.endif
-.endif
-	rts
-
-; Used to adjust the Bnum setting when portamento is used
+; Used to adjust Bnum when portamento is used
 ;
 ft_vrc7_adjust_octave:
 
 	; Get octave
-	lda var_ch_ActiveNote - VRC7_CHANNEL, x
+	lda var_ch_vrc7_ActiveNote - VRC7_CHANNEL, x
 	sta ACC
 	lda #12
 	sta AUX
@@ -249,23 +192,23 @@ ft_vrc7_adjust_octave:
 	tay
 
 	lda	ACC					; if new octave > old octave
-	cmp var_ch_OldOctave
+	cmp var_ch_vrc7_OldOctave
 	bcs :+
 	; Old octave > new octave, shift down portamento frequency
-	lda var_ch_OldOctave
-	sta var_ch_Bnum - VRC7_CHANNEL, x
+	lda var_ch_vrc7_OldOctave
+	sta var_ch_vrc7_Bnum - VRC7_CHANNEL, x
 	sec
 	sbc ACC
 	jsr @ShiftFreq2
 	rts
-:	lda	var_ch_OldOctave	; if old octave > new octave
+:	lda	var_ch_vrc7_OldOctave	; if old octave > new octave
 	cmp ACC
 	bcs @Return
 	; New octave > old octave, shift down old frequency
 	lda ACC
-	sta var_ch_Bnum - VRC7_CHANNEL, x
+	sta var_ch_vrc7_Bnum - VRC7_CHANNEL, x
 	sec
-	sbc var_ch_OldOctave
+	sbc var_ch_vrc7_OldOctave
 	jsr @ShiftFreq
 @Return:
 	rts
@@ -290,16 +233,24 @@ ft_vrc7_adjust_octave:
 	ldy var_Temp
 	rts
 
+; Called when a new note is found from pattern reader
 ft_vrc7_trigger:
-
+;.if 0
+ 	cpx #$06
+ 	bne :+
+; 	rts
+;	brk
+	:
+;.endif
     lda var_ch_Effect, x
     cmp #EFF_PORTAMENTO
    	bne :+
-    lda var_ch_Command - VRC7_CHANNEL, x
+    lda var_ch_vrc7_Command - VRC7_CHANNEL, x
     bne :++
 :
-	lda #$01							; Trigger VRC7 channel
-	sta var_ch_Command - VRC7_CHANNEL, x
+
+	lda #VRC7_TRIGGER							; Trigger VRC7 channel
+	sta var_ch_vrc7_Command - VRC7_CHANNEL, x
 :
 
 	; Adjust Fnum if portamento is enabled
@@ -312,9 +263,7 @@ ft_vrc7_trigger:
 ;	sbc #$01
 	beq @Return
 
-	;rts
-
-	lda var_ch_OldOctave
+	lda var_ch_vrc7_OldOctave
 	bmi @Return
 
 	jsr ft_vrc7_adjust_octave
@@ -327,11 +276,20 @@ ft_vrc7_get_freq:
 	tya
 	pha
 
-	lda var_ch_Bnum - VRC7_CHANNEL, x	
-	sta var_ch_OldOctave
+	lda var_ch_vrc7_Command - VRC7_CHANNEL, x
+	cmp #VRC7_HALT
+	bne :+
+	; Clear old frequency if channel was halted
+	lda #$00
+	sta var_ch_TimerPeriod, x
+	sta var_ch_TimerPeriod + EFF_CHANS, x
+:
+
+	lda var_ch_vrc7_Bnum - VRC7_CHANNEL, x
+	sta var_ch_vrc7_OldOctave
 
 	; Retrigger channel
-	lda var_ch_ActiveNote - VRC7_CHANNEL, x
+	lda var_ch_vrc7_ActiveNote - VRC7_CHANNEL, x
 	jsr ft_translate_note_vrc7
 	ldy EXT	; note index -> y
 
@@ -354,7 +312,7 @@ ft_vrc7_get_freq:
 	sta var_ch_TimerPeriod + EFF_CHANS, x
 
 	lda #$80				; Indicate new note (no previous)
-	sta var_ch_OldOctave
+	sta var_ch_vrc7_OldOctave
 
 	jmp :+
 
@@ -365,7 +323,7 @@ ft_vrc7_get_freq:
 	sta var_ch_TimerPeriod + EFF_CHANS, x
 
 :	lda ACC
-	sta var_ch_Bnum - VRC7_CHANNEL, x
+	sta var_ch_vrc7_Bnum - VRC7_CHANNEL, x
 
 	pla
 	tay
@@ -381,7 +339,7 @@ ft_vrc7_get_freq_only:
 	pha
 
 	; Retrigger channel
-	lda var_ch_ActiveNote - VRC7_CHANNEL, x
+	lda var_ch_vrc7_ActiveNote - VRC7_CHANNEL, x
 	jsr ft_translate_note_vrc7
 	ldy EXT	; note index -> y
 
@@ -390,11 +348,11 @@ ft_vrc7_get_freq_only:
 	lda ft_note_table_vrc7_h, y
 	sta var_ch_TimerPeriod + EFF_CHANS, x
 
-	lda var_ch_Bnum - VRC7_CHANNEL, x
-	sta var_ch_OldOctave
+	lda var_ch_vrc7_Bnum - VRC7_CHANNEL, x
+	sta var_ch_vrc7_OldOctave
 
 	lda ACC
-	sta var_ch_Bnum - VRC7_CHANNEL, x
+	sta var_ch_vrc7_Bnum - VRC7_CHANNEL, x
 	
 	lda #$00
 	sta var_ch_State, x
@@ -463,6 +421,14 @@ ft_vrc7_load_slide:
 	jsr ft_vrc7_adjust_octave
     rts
 
+ft_vrc7_delay:
+	pha
+	lda	#$01
+:	asl	a
+	bcc	:-
+	pla
+	rts
+
 ; Fnum table, multiplied by 4 for more resolution
 ft_note_table_vrc7_l:
 	.byte 176, 212, 0, 48, 96, 148, 200, 4, 64, 128, 196, 12
@@ -472,3 +438,4 @@ ft_note_table_vrc7_h:
 ;	.byte 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1
 ft_vrc7_cmd:
 	.byte $30, $20
+

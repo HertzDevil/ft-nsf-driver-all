@@ -60,10 +60,13 @@ ft_read_channels:
 	sta var_ch_Delay, x
 	jsr ft_read_pattern
 :	jsr ft_read_pattern					; Get new notes
+	lda var_ch_NoteCut, x
+	and #$7F
+	sta var_ch_NoteCut, x
 	inx
 	cpx #CHANNELS
 	bne ft_read_channels
-	
+
 	; Should jump?
 	lda var_Jump
 	beq @NoJump
@@ -141,7 +144,6 @@ ft_skip_row_update:
 	beq :+
 	sec
 	sbc #$01
-;	brk
 	sta var_ch_NoteCut, x
 	bne :+
 	sta var_ch_Note, x
@@ -157,7 +159,7 @@ ft_loop_channels:
 
 	; Do channel effects, like portamento and vibrato
 	jsr ft_run_effects
-	
+
 	; Instrument sequences
 	lda var_ch_Note, x
 	beq :+
@@ -186,8 +188,8 @@ ft_loop_channels:
 
 	; End of music routine, return
 	rts
-	
-	
+
+
 ; Process a pattern row in channel X
 ft_read_pattern:
 	ldy var_ch_NoteDelay, x				; First check if in the middle of a row delay
@@ -229,8 +231,12 @@ ft_read_note:
 	; Read a note
 	sta var_ch_Note, x					; Note on
 	jsr ft_translate_freq
+
+	lda var_ch_NoteCut, x
+	bmi :+
 	lda #$00
-	sta var_ch_NoteCut, x
+	sta var_ch_NoteCut, x				; Reset note cuts
+:
 .ifdef USE_DPCM
 	cpx #DPCM_CHANNEL					; Break here if DPCM
 	bne :+
@@ -264,6 +270,16 @@ ft_read_note:
 	ora var_ch_DutyCycle, x
 	sta var_ch_DutyCycle, x
 
+	; Reset sweep
+	lda var_ch_Effect,x
+	cmp #EFF_SLIDE_UP
+	beq :+
+	cmp #EFF_SLIDE_DOWN
+	bne :++
+:	lda #EFF_NONE
+	sta var_ch_Effect,x
+:
+
 	cpx #$02							; Skip if not square
 	bcc :+
 	jmp @ReadIsDone
@@ -274,6 +290,10 @@ ft_read_note:
 @NoteRelease:
 	lda #$01
 	sta var_ch_State, x
+.ifdef USE_VRC7
+    cpx #VRC7_CHANNEL
+    bcs @JumpToDone
+.endif
 	jsr ft_instrument_release
 	jmp @ReadIsDone
 @NoteOff:
@@ -291,7 +311,7 @@ ft_read_note:
 	cpx #VRC7_CHANNEL + 6
 	bcs :+
 	lda #$00							; Halt VRC7 channel
-	sta var_ch_Command - VRC7_CHANNEL, x
+	sta var_ch_vrc7_Command - VRC7_CHANNEL, x
 	jmp @ReadIsDone
 :
 .endif
@@ -359,8 +379,6 @@ ft_read_is_done:
 	adc var_Temp_Pattern + 1
 	sta var_ch_Pattern_addr + CHANNELS, x
 
-
-	;rts
 	lda var_Sweep						; Check sweep
 	beq @EndPatternFetch
 	sta var_ch_Sweep, x					; Store sweep, only used for square 1 and 2
@@ -481,7 +499,7 @@ ft_cmd_jump:
 	sta var_Jump
 	jmp ft_read_note
 ; Effect: Skip (Dxx)
-ft_cmd_skip: 
+ft_cmd_skip:
 	jsr ft_get_pattern_byte
 	sta var_Skip
 	jmp ft_read_note
@@ -517,6 +535,12 @@ ft_cmd_porta_up:
 	lda #EFF_PORTA_DOWN
 :
 .endif
+.ifdef USE_VRC7
+   	cpx	#VRC7_CHANNEL
+	bcc :+
+	lda #EFF_PORTA_DOWN
+	:
+.endif
 	sta var_ch_Effect, x
 	jmp ft_read_note
 ; Effect: Portamento down (2xx)
@@ -530,6 +554,12 @@ ft_cmd_porta_down:
 	bne :+
 	lda #EFF_PORTA_UP
 :
+.endif
+.ifdef USE_VRC7
+   	cpx	#VRC7_CHANNEL
+	bcc :+
+	lda #EFF_PORTA_UP
+	:
 .endif
 	sta var_ch_Effect, x
 	jmp ft_read_note
@@ -613,10 +643,10 @@ ft_cmd_dac:
 	sta var_ch_DPCMDAC
 .endif
 	jmp ft_read_note
-; Effect: Duty cycle
+; Effect: Duty cycle (Vxx)
 ft_cmd_duty:
 	jsr ft_get_pattern_byte
-	sta var_ch_DutyCycle, x
+	sta var_ch_DutyCycle, x	; xxxxyyyy: xxxx = default value, yyyy = current value
 	clc
 	asl a
 	asl a
@@ -654,6 +684,7 @@ ft_cmd_vol_slide:
 ; Effect: Note cut (Sxx)
 ft_cmd_note_cut:
 	jsr ft_get_pattern_byte
+	ora #$80
 	sta var_ch_NoteCut, x
 	jmp ft_read_note
 ; Effect: Retrigger
@@ -731,7 +762,7 @@ ft_translate_freq_only:
 .ifdef USE_VRC7
 	cpx	#VRC7_CHANNEL
 	bcc :+
-	sta var_ch_ActiveNote - VRC7_CHANNEL, x
+	sta var_ch_vrc7_ActiveNote - VRC7_CHANNEL, x
 	jsr ft_vrc7_get_freq_only
 	rts
 :
@@ -777,7 +808,7 @@ ft_translate_freq:
 	bcc :+
 ;	clc
 ;	adc #$01						; todo: remove this eventually
-	sta var_ch_ActiveNote - VRC7_CHANNEL, x
+	sta var_ch_vrc7_ActiveNote - VRC7_CHANNEL, x
 	jsr ft_vrc7_get_freq
 	rts
 :
@@ -858,20 +889,6 @@ StoreDPCM:							; Special case for DPCM
 	ldy var_Temp
 	rts
 .endif
-
-;.ifdef USE_VRC6
-;StoreSawtooth:
-;	rts
-;.endif
-
-;.ifdef USE_VRC7
-;ft_translate_vrc7:
-;	lda #172
-;	sta var_ch_TimerPeriod, x
-;	lda #$04
-;	sta var_ch_TimerPeriod + SFX_CHANS, x
-;	rts
-;.endif
 
 ; Reload speed division counter
 ft_restore_speed:

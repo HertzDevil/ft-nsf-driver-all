@@ -36,7 +36,7 @@ ft_update_fds:
 
 	lda var_ch_Note + FDS_CHANNEL
 	beq @KillFDS
-	
+
 	; Calculate volume	
 	lda var_ch_VolColumn + FDS_CHANNEL		; Kill channel if volume column = 0
 	lsr a
@@ -52,14 +52,20 @@ ft_update_fds:
 	; Load volume
 	ora #$80								; Disable the volume envelope
 	sta $4080								; Volume
-	
+
 	; Load frequency
+	lda var_ch_TimerCalculated + FDS_CHANNEL + EFF_CHANS
+	and #$F0
+	beq :+
+	lda #$FF
+	sta var_ch_TimerCalculated + FDS_CHANNEL
+	lda #$0F
+	sta var_ch_TimerCalculated + FDS_CHANNEL + EFF_CHANS
+:	lda var_ch_TimerCalculated + FDS_CHANNEL + EFF_CHANS
+	sta $4083	; High
 	lda var_ch_TimerCalculated + FDS_CHANNEL
 	sta $4082	; Low
-	lda var_ch_TimerCalculated + FDS_CHANNEL + EFF_CHANS
-	sta $4083	; High
 
-	
 	lda var_ch_ModDelayTick					; Modulation delay
 	bne @TickDownDelay
 ;	lda var_ch_ModDepth						; Skip if modulation is disabled
@@ -89,10 +95,13 @@ ft_update_fds:
 	sta $4084
 	rts
 @KillFDS:
-	lda #$00
+	lda #$80
 	sta $4080	; Make channel silent
+	lda #$80
+	sta $4084
+	sta $4087
 	rts
-	
+
 ; Load the waveform, index in A
 ft_load_fds_wave:
 	;lda #$02

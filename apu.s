@@ -249,8 +249,8 @@ ft_update_apu:
 	lda #$FF
 	sta var_ch_TimerCalculated + 2
 @TimerOverflow3:	
-	lda #$08
-	sta $4009
+;	lda #$08
+;	sta $4009
 	lda var_ch_TimerCalculated + 2
 	sta $400A
 	lda var_ch_TimerCalculated + EFF_CHANS + 2
@@ -346,8 +346,8 @@ ft_update_apu:
 	sta $4012
 
 	lda var_ch_DPCM_Offset
-	lsr a
-	lsr a
+	asl a
+	asl a
 	sta var_Temp
 	sec
 	lda var_ch_SampleLen

@@ -1,6 +1,6 @@
 ;
 ; The NSF music driver for FamiTracker
-; Version 2.4
+; Version 2.5
 ; By jsr (zxy965r@tninet.se)
 ; assemble with ca65
 ;
@@ -10,7 +10,7 @@
 ;
 
 ;
-; ToDo; 
+; ToDo;
 ;
 
 ;
@@ -103,6 +103,7 @@ HEAD_TEMPO				= 12
 ;SPEED_DIV_NTSC			= 60 * 60;
 ;SPEED_DIV_PAL			= 60 * 50;
 
+EFF_NONE				= 0
 EFF_ARPEGGIO			= 1
 EFF_PORTAMENTO			= 2
 EFF_PORTA_UP			= 3
@@ -210,7 +211,7 @@ var_ch_FinePitch:		.res CHANNELS				; Fine pitch setting
 
 var_ch_NoteDelay:		.res CHANNELS				; Delay in rows until next note
 var_ch_DefaultDelay:	.res CHANNELS				; Default row delay, if exists
-	
+
 ; Following is specific to chip channels (2A03, VRC6...)
 
 var_ch_TimerPeriod:		.res EFF_CHANS * 2			; Current channel note period
@@ -218,7 +219,7 @@ var_ch_TimerCalculated:	.res EFF_CHANS * 2			; Frequency after fine pitch and vi
 var_ch_OutVolume:		.res CHANNELS				; Volume for the APU
 var_ch_VolSlide:		.res CHANNELS				; Volume slide
 
-; --- Testing --- 
+; --- Testing ---
 ;var_ch_LoopCounter:		.res CHANNELS
 ; --- Testing --- 
 
@@ -254,8 +255,8 @@ var_ch_TremoloPos:		.res EFF_CHANS				; Tremolo
 var_ch_TremoloDepth:	.res EFF_CHANS				; combine these
 var_ch_TremoloSpeed:	.res EFF_CHANS
 
-;var_ch_VibratoParam:	.res WAVE_CHANS
-;var_ch_TremoloParam:	.res WAVE_CHANS
+;var_ch_VibratoParam:	.res EFF_CHANS
+;var_ch_TremoloParam:	.res EFF_CHANS
 
 ; DPCM variables
 .ifdef USE_DPCM
@@ -269,17 +270,17 @@ var_ch_DPCM_RetrigCntr:	.res 1
 .endif
 
 .ifdef USE_MMC5
-var_ch_PrevFreqHighMMC5: 	.res 2					; MMC5
+var_ch_PrevFreqHighMMC5: .res 2					; MMC5
 .endif
 
 .ifdef USE_VRC7
-var_ch_CustomPatch:		.res 1						; Keep track of the custom patch
-var_ch_Patch:			.res 6						; VRC7 patch
-var_ch_Fnum:			.res 6 * 2
-var_ch_Bnum:			.res 6
-var_ch_ActiveNote:		.res 6
-var_ch_Command:			.res 6						; 0 = halt, 1 = trigger, 80 = update
-var_ch_OldOctave:		.res 1						; Temp variable for old octave when triggering new notes
+var_ch_vrc7_CustomPatch: .res 1						; Keep track of the custom patch
+var_ch_vrc7_Patch:		 .res 6						; VRC7 patch
+var_ch_vrc7_Fnum:		 .res 6 * 2
+var_ch_vrc7_Bnum:		 .res 6
+var_ch_vrc7_ActiveNote:	 .res 6
+var_ch_vrc7_Command:	 .res 6						; 0 = halt, 1 = trigger, 80 = update
+var_ch_vrc7_OldOctave:	 .res 1						; Temp variable for old octave when triggering new notes
 .endif
 
 .ifdef USE_FDS

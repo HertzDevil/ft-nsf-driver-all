@@ -30,6 +30,21 @@ ft_run_effects:
 :	sta var_ch_VolColumn, x
 @NoVolSlide:
 
+.if 0
+    lda var_ch_Effect, x
+    bne :+
+    ; No effect
+    rts
+:	asl a
+	tay
+	lda ft_effect_table - 2, y
+	sta var_Temp_Pointer
+	lda ft_effect_table - 1, y
+	sta var_Temp_Pointer + 1
+	jmp (var_Temp_Pointer)
+.endif
+
+;.if 0
 	; Arpeggio and portamento
 	lda var_ch_Effect, x
 	beq @NoEffect
@@ -43,7 +58,7 @@ ft_run_effects:
 	beq @EffSlideUp
 	cmp #EFF_SLIDE_DOWN
 	beq @EffSlideDown
-	
+
 	cmp #EFF_SLIDE_UP_LOAD
 	beq @EffLoadSlide
 	cmp #EFF_SLIDE_DOWN_LOAD
@@ -64,9 +79,14 @@ ft_run_effects:
 @EffLoadSlide:
 	jmp ft_load_slide
 @NoEffect:
-
+;.endif
 ft_post_effects:
 	rts
+
+ft_effect_table:
+    .word ft_arpeggio, ft_portamento, ft_portamento_up, ft_portamento_down
+    .word ft_load_slide, ft_slide_up, ft_load_slide, ft_slide_down
+
 
 ft_load_slide:
 
@@ -136,22 +156,30 @@ ft_load_slide:
 
 ft_calc_freq:
 
-;.ifdef USE_VRC7
-;	cpx #VRC7_CHANNEL
-;	bcc :+
-;	rts
-;:
-;.endif
-
- 	; Apply fine pitch
- 	lda var_ch_FinePitch, x
- 	cmp #$80
- 	beq @SkipFinePitch
-	clc
+ 	; Load frequency
 	lda var_ch_TimerPeriod, x
-	adc #$80
 	sta var_ch_TimerCalculated, x
 	lda var_ch_TimerPeriod + EFF_CHANS, x
+	sta var_ch_TimerCalculated + EFF_CHANS, x
+
+.ifdef USE_VRC7
+	cpx #VRC7_CHANNEL
+	bcc :+
+	lsr var_ch_TimerCalculated + EFF_CHANS, x
+	ror var_ch_TimerCalculated, x
+	lsr var_ch_TimerCalculated + EFF_CHANS, x
+	ror var_ch_TimerCalculated, x
+:
+.endif
+
+	; Apply fine pitch
+ 	lda var_ch_FinePitch, x
+ 	cmp #$80
+ 	beq @Skip
+	lda var_ch_TimerCalculated, x
+	adc #$80
+	sta var_ch_TimerCalculated, x
+	lda var_ch_TimerCalculated + EFF_CHANS, x
 	adc #$00
 	sta var_ch_TimerCalculated + EFF_CHANS, x
 	sec
@@ -161,19 +189,10 @@ ft_calc_freq:
 	lda var_ch_TimerCalculated + EFF_CHANS, x
 	sbc #$00
 	sta var_ch_TimerCalculated + EFF_CHANS, x
-	jmp @DoTheRest
-@SkipFinePitch:
-	lda var_ch_TimerPeriod, x
-	sta var_ch_TimerCalculated, x
-	lda var_ch_TimerPeriod + EFF_CHANS, x
-	sta var_ch_TimerCalculated + EFF_CHANS, x
-@DoTheRest:
+@Skip:
 
 	jsr ft_vibrato
 	jsr ft_tremolo
-
-;	lda var_ch_Volume, x
-;	sta var_ch_OutVolume, x
 
 	rts
 
@@ -195,9 +214,9 @@ ft_portamento:
 	cmp var_ch_PortaTo, x
 	bcc @Increase
 	bne @Decrease
-	;rts										; done
+	;rts											; done
 	jmp ft_post_effects
-@Decrease:										; Decrease frequency
+@Decrease:											; Decrease frequency
 	sec
 	lda var_ch_TimerPeriod, x
 	sbc var_ch_EffParam, x
@@ -206,7 +225,7 @@ ft_portamento:
 	sbc #$00
 	sta var_ch_TimerPeriod + EFF_CHANS, x
 	; Check if sign bit has changed, if so load the desired frequency
-	lda var_ch_TimerPeriod + EFF_CHANS, x		; Compare high byte
+	lda var_ch_TimerPeriod + EFF_CHANS, x			; Compare high byte
 	cmp var_ch_PortaTo + EFF_CHANS, x
 	bcc @LoadFrequency
 	bmi @LoadFrequency
@@ -214,10 +233,10 @@ ft_portamento:
 	lda var_ch_TimerPeriod, x						; Compare low byte
 	cmp var_ch_PortaTo, x
 	bcc @LoadFrequency
-;	rts											; Portamento is done at this point
+;	rts												; Portamento is done at this point
 	jmp ft_post_effects
 
-@Increase:										; Increase frequency
+@Increase:											; Increase frequency
 	clc
 	lda var_ch_TimerPeriod, x
 	adc var_ch_EffParam, x
@@ -226,17 +245,17 @@ ft_portamento:
 	adc #$00
 	sta var_ch_TimerPeriod + EFF_CHANS, x
 	; Check if sign bit has changed, if so load the desired frequency
-	lda var_ch_PortaTo + EFF_CHANS, x			; Compare high byte
+	lda var_ch_PortaTo + EFF_CHANS, x				; Compare high byte
 	cmp var_ch_TimerPeriod + EFF_CHANS, x
 	bcc @LoadFrequency
 	bne @NoPortamento
-	lda var_ch_PortaTo, x						; Compare low byte
+	lda var_ch_PortaTo, x							; Compare low byte
 	cmp var_ch_TimerPeriod, x
 	bcc @LoadFrequency
 ;	rts
 	jmp ft_post_effects
 
-@LoadFrequency:									; Load the correct frequency
+@LoadFrequency:										; Load the correct frequency
 	lda var_ch_PortaTo, x
 	sta var_ch_TimerPeriod, x
 	lda var_ch_PortaTo + EFF_CHANS, x
@@ -276,11 +295,11 @@ ft_slide_up:
 	lda var_ch_TimerPeriod + EFF_CHANS, x
 	sbc #$00
 	sta var_ch_TimerPeriod + EFF_CHANS, x
-	cmp var_ch_PortaTo + EFF_CHANS, x
+	cmp var_ch_PortaTo + EFF_CHANS, x			; Compare high byte
 	bcc ft_slide_done
 	bne ft_slide_not_done
-	lda var_ch_TimerPeriod, x						; Compare low byte
-	cmp var_ch_PortaTo, x
+	lda var_ch_TimerPeriod, x
+	cmp var_ch_PortaTo, x						; Compare low byte
 	bcc ft_slide_done
 	jmp ft_post_effects
 ft_slide_down:
@@ -292,19 +311,18 @@ ft_slide_down:
 	adc #$00
 	sta var_ch_TimerPeriod + EFF_CHANS, x
 	cmp var_ch_PortaTo + EFF_CHANS, x			; Compare high byte
-;	bcc ft_slide_done
-;	bcs ft_slide_done
-	bne ft_slide_not_done
-	lda var_ch_PortaTo, x						; Compare low byte
-	cmp var_ch_TimerPeriod, x
-	bcc ft_slide_done
+	bcc ft_slide_not_done
+	bne ft_slide_done
+	lda var_ch_TimerPeriod, x
+	cmp var_ch_PortaTo, x						; Compare low byte
+	bcs ft_slide_done
 	jmp ft_post_effects
 ft_slide_done:
 	lda var_ch_PortaTo, x
 	sta var_ch_TimerPeriod, x
 	lda var_ch_PortaTo + EFF_CHANS, x
 	sta var_ch_TimerPeriod + EFF_CHANS, x
-	lda #$00									; Reset effect
+	lda #EFF_NONE								; Reset effect
 	sta var_ch_Effect, x
 ft_slide_not_done:
 	jmp ft_post_effects
@@ -353,10 +371,9 @@ ft_arpeggio:
 ;
 ft_vibrato:
 	lda var_ch_VibratoSpeed, x
-	bne @DoVibrato
+	bne :+
 	rts
-@DoVibrato:
-	clc
+:	clc
 	adc var_ch_VibratoPos, x		; Get next position
 	and #$3F
 	sta var_ch_VibratoPos, x
@@ -376,17 +393,17 @@ ft_vibrato:
 	sbc var_Temp
 	;and #$0F
 	ora var_ch_VibratoDepth, x
-	tay 
+	tay
 	lda ft_vibrato_table, y
 	eor #$FF
 	sta var_Temp16
 	lda #$FF
 	sta var_Temp16 + 1
 	jmp @Calculate
-@Phase1:	
+@Phase1:
 	; Phase + depth
 	ora var_ch_VibratoDepth, x
-	tay 
+	tay
 	lda ft_vibrato_table, y
 	sta var_Temp16
 	lda #$00
@@ -432,7 +449,7 @@ ft_vibrato:
 	lda ft_vibrato_table, y		; add depth + 1
 	clc
 	adc #$01
-	clc
+;	clc
 	adc var_Temp16
 	sta var_Temp16
 	lda var_Temp16 + 1
@@ -441,14 +458,6 @@ ft_vibrato:
 	lsr var_Temp16 + 1			; divide by 2
 	ror var_Temp16
 :
-
-.ifdef USE_VRC7
-	cpx #VRC7_CHANNEL
-	bcc :+
-	rts
-:
-.endif
-
 	sec
 	lda var_ch_TimerCalculated, x
 	sbc var_Temp16
@@ -486,13 +495,15 @@ ft_tremolo:
 	ora var_ch_TremoloDepth, x
 	tay 
 	lda ft_vibrato_table, y
+	lsr a
 	sta var_Temp
 	jmp @Calculate
-@Phase1:	
+@Phase1:
 	; Phase + depth
 	ora var_ch_TremoloDepth, x
-	tay 
+	tay
 	lda ft_vibrato_table, y
+	lsr a
 	sta var_Temp
 @Calculate:
 	sec

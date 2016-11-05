@@ -60,7 +60,7 @@ ft_music_init:
 	rts
 
 ;
-; Prepare the player with a song
+; Prepare the player for a song
 ;
 ; NSF music data header:
 ;
@@ -68,6 +68,10 @@ ft_music_init:
 ; - Instrument list, 2 bytes
 ; - DPCM instrument list, 2 bytes
 ; - DPCM sample list, 2 bytes
+; - Flags, 1 byte
+; - Pointer to wave tables, 2 bytes, if FDS is enabled
+; - NTSC speed divider
+; - PAL speed divider
 ;
 ft_load_song:
 	pha
@@ -105,9 +109,9 @@ ft_load_song:
 	lda (var_Temp_Pointer), y
 	adc ft_music_addr + 1
 	sta var_Wavetables + 1
-	iny	
+	iny
 .endif
-	
+
 	cpx #$01							; PAL / NTSC flag
 	beq @LoadPAL
 .ifdef NTSC_PERIOD_TABLE
@@ -170,19 +174,23 @@ ft_load_song:
 	inx
 	cpx #(CHANNELS - 1)
 	bne @ClearChannels2
-	
+
 	ldx #$FF
 	stx var_ch_PrevFreqHigh			; Set prev freq to FF for Sq1 & 2
 	stx var_ch_PrevFreqHigh + 1
-	
+
+.ifdef USE_DPCM
+    lda #$00
+    sta var_ch_DPCM_Offset
+.endif
 .ifdef USE_MMC5
 	stx var_ch_PrevFreqHighMMC5
 	stx var_ch_PrevFreqHighMMC5 + 1
 .endif
 .ifdef USE_VRC7
-	stx var_ch_CustomPatch
+	stx var_ch_vrc7_CustomPatch
 .endif
-	
+
 	inx								; Jump to the first frame
 	stx var_Current_Frame
 	jsr ft_load_frame
