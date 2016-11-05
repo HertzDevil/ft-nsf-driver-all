@@ -151,6 +151,7 @@ ft_update_vrc6:
 
 	ora ft_duty_table_vrc6, x
 	asl a
+	and #$3F
 	sta $B000
 	lda	var_ch_PeriodCalcLo + VRC6_CH3
 	sta $B001

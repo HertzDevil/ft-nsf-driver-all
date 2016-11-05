@@ -175,6 +175,14 @@ ft_skip_row_update:
 	sta var_ch_PortaToHi, x
     sta var_ch_TimerPeriodLo, x
     sta var_ch_TimerPeriodHi, x
+.ifdef USE_VRC7
+	lda ft_channel_type, x
+	cmp #CHAN_VRC7
+	bne :+
+	lda #$00							; Halt VRC7 channel
+	sta var_ch_vrc7_Command - VRC7_CHANNEL, x
+.endif
+	; End VRC7
 :	inx
 .ifdef USE_N163
     cpx var_AllChannels
@@ -351,15 +359,12 @@ ft_read_note:
 @JumpToDone:
 	jmp @ReadIsDone
 @NoteRelease:
-;    lda var_ch_State, x
-;    cmp #$01
-;    bne :+
-;    jmp @ReadIsDone
-;:
+    lda var_ch_State, x
+    cmp #$01
+    beq @JumpToDone
 	lda #$01
 	sta var_ch_State, x
 .ifdef USE_DPCM
-;	cpx #DPCM_CHANNEL					; Skip if DPCM
 	lda ft_channel_map, x
 	cmp #CHAN_2A03_DPCM
 	bne :+
@@ -378,7 +383,6 @@ ft_read_note:
 	lda #$00
 	sta var_ch_Note, x
 .ifdef USE_DPCM
-;	cpx #DPCM_CHANNEL					; Skip if DPCM
 	lda ft_channel_map, x
 	cmp #CHAN_2A03_DPCM
 	bne :+
@@ -386,15 +390,15 @@ ft_read_note:
 :   lda #$00
 .endif
 .ifdef USE_VRC7
-;	cpx #VRC7_CHANNEL					; Skip if not VRC7 channel
-;	bcc :+
-;	cpx #VRC7_CHANNEL + 6
-;	bcs :+
 	lda ft_channel_type, x
 	cmp #CHAN_VRC7
 	bne :+
 	lda #$00							; Halt VRC7 channel
 	sta var_ch_vrc7_Command - VRC7_CHANNEL, x
+	sta var_ch_PortaToLo, x
+	sta var_ch_PortaToHi, x
+    sta var_ch_TimerPeriodLo, x
+    sta var_ch_TimerPeriodHi, x
 	jmp @ReadIsDone
 :   lda #$00
 .endif

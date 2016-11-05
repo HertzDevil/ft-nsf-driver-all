@@ -526,6 +526,8 @@ ft_SkipToRow:
     cpx #CHANNELS
 .endif
 	bne @ChannelLoop
+	lda #$00
+	sta var_SkipTo
 	rts
 
 @Effect:
@@ -536,7 +538,11 @@ ft_SkipToRow:
 	cmp #$84
 	beq @EffectNoDuration
 	pha
-	cmp #$8E							; remove pitch slide
+	cmp #$8E
+	beq @OneByteCommand
+	cmp #$92
+	beq @OneByteCommand
+	cmp #$A2
 	beq @OneByteCommand
 	and #$F0
 	cmp #$F0							; See if volume

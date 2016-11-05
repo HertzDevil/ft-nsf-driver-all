@@ -3,9 +3,9 @@
 ;  1 = trigger
 ;  80 = update
 
-VRC7_HALT = $00
-VRC7_TRIGGER = $01
-VRC7_HOLD_NOTE = $80
+VRC7_HALT       = $00
+VRC7_TRIGGER    = $01
+VRC7_HOLD_NOTE  = $80
 
 ft_init_vrc7:
     lda #$00
@@ -38,7 +38,7 @@ ft_clear_vrc7:
 	adc #$20	; $20: Clear channel
 	sta $9010
 	jsr ft_vrc7_delay
-	lda var_Period + 1
+ 	lda var_ch_vrc7_FnumHi, x
 	ora var_ch_vrc7_Bnum, x
 	sta $9030
 	jsr ft_vrc7_delay
@@ -73,9 +73,9 @@ ft_update_vrc7:
 	bne :+
 	lda #VRC7_HALT
 	sta var_ch_vrc7_Command, x
-:
+
     ; See if retrigger is needed
-	lda var_ch_vrc7_Command, x
+:	lda var_ch_vrc7_Command, x
 	cmp #VRC7_TRIGGER
 	bne @UpdateChannel
 
@@ -87,19 +87,22 @@ ft_update_vrc7:
 	sta var_ch_vrc7_Command, x
 
 @UpdateChannel:
-    ; Load period
+    ; Load and cache period if there is an active note
+    lda var_ch_Note + VRC7_CHANNEL, x
+    beq @SkipPeriod
 	lda var_ch_PeriodCalcLo + VRC7_CHANNEL, x
-	sta var_Period
+	sta var_ch_vrc7_FnumLo, x
 	lda var_ch_PeriodCalcHi + VRC7_CHANNEL, x
 	and #$07
-	sta var_Period + 1
+	sta var_ch_vrc7_FnumHi, x
+@SkipPeriod:
 
 	clc
 	txa
 	adc #$10	; $10: Low part of Fnum
 	sta $9010
 	jsr ft_vrc7_delay
-	lda var_Period
+    lda var_ch_vrc7_FnumLo, x
 	sta $9030
 	jsr ft_vrc7_delay
 
@@ -117,8 +120,7 @@ ft_update_vrc7:
 	lda ft_vrc7_cmd, y
 	sta var_Temp2
 
-:
-	clc
+:	clc
 	txa
 	adc #$30	; $30: Patch & Volume
 	sta $9010
@@ -143,7 +145,7 @@ ft_update_vrc7:
 	jsr ft_vrc7_delay
 	lda var_ch_vrc7_Bnum, x
 	asl a
-	ora var_Period + 1
+	ora var_ch_vrc7_FnumHi, x
 	ora var_Temp2
 	sta $9030
 	jsr ft_vrc7_delay
@@ -220,44 +222,33 @@ ft_vrc7_adjust_octave:
 ft_vrc7_trigger:
 
     lda var_ch_vrc7_Patch - VRC7_CHANNEL, x
-    bne :+
+    bne @SkipCustomPatch
 
     lda var_ch_vrc7_CustomLo - VRC7_CHANNEL, x
     sta var_CustomPatchPtr
     lda var_ch_vrc7_CustomHi - VRC7_CHANNEL, x
     sta var_CustomPatchPtr + 1
-
     jsr ft_load_vrc7_custom_patch
-:
-
+@SkipCustomPatch:
  	cpx #$06
  	bne :+
-	:
-
-    lda var_ch_Effect, x
+:   lda var_ch_Effect, x
     cmp #EFF_PORTAMENTO
    	bne :+
     lda var_ch_vrc7_Command - VRC7_CHANNEL, x
     bne :++
-:
-
-	lda #VRC7_TRIGGER							; Trigger VRC7 channel
+:	lda #VRC7_TRIGGER							; Trigger VRC7 channel
 	sta var_ch_vrc7_Command - VRC7_CHANNEL, x
-:
-
 	; Adjust Fnum if portamento is enabled
-	lda var_ch_Effect, x
+:	lda var_ch_Effect, x
 	cmp #EFF_PORTAMENTO
 	bne @Return
 	; Load portamento
 	lda var_ch_Note, x
 	beq @Return
-
 	lda var_ch_vrc7_OldOctave
 	bmi @Return
-
 	jsr ft_vrc7_adjust_octave
-
 @Return:
 	rts
 
@@ -273,9 +264,8 @@ ft_vrc7_get_freq:
 	lda #$00
 	sta var_ch_TimerPeriodLo, x
 	sta var_ch_TimerPeriodHi, x
-:
 
-	lda var_ch_vrc7_Bnum - VRC7_CHANNEL, x
+:	lda var_ch_vrc7_Bnum - VRC7_CHANNEL, x
 	sta var_ch_vrc7_OldOctave
 
 	; Retrigger channel

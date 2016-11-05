@@ -394,10 +394,14 @@ ft_update_apu:
 	lda var_ch_Note, x
 	beq @KillDPCM
 	bmi @SkipDPCM
+	lda var_ch_SamplePitch
+	and #$40
+	sta var_Temp
 	lda var_ch_DPCM_EffPitch
 	bpl :+
 	lda var_ch_SamplePitch
-:	sta $4010
+:   ora var_Temp
+    sta $4010
 	lda #$80
 	sta var_ch_DPCM_EffPitch
 

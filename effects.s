@@ -216,7 +216,9 @@ ft_calc_period:
  	lda var_ch_FinePitch, x
  	cmp #$80
  	beq @Skip
- 	
+ 	lda var_ch_Note, x    ; Skip on note off as well to avoid problems with VRC7
+ 	beq @Skip
+
 ;	.if 0
 
 .ifdef USE_N163
@@ -470,6 +472,8 @@ ft_slide_done:
 
 	lda #EFF_NONE						; Reset effect
 	sta var_ch_Effect, x
+	sta var_ch_PortaToLo, x
+	sta var_ch_PortaToHi, x
 
 ft_slide_not_done:
 	jmp ft_post_effects

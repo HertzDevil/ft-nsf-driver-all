@@ -1,6 +1,6 @@
 ;
 ; The NSF music driver for FamiTracker
-; Version 2.10
+; Version 2.11
 ; By jsr (jsr@famitracker.com)
 ; assemble with ca65
 ;
@@ -198,7 +198,7 @@ var_Wave_pointer:		.res 2
 .endif
 
 .ifdef USE_VRC7
-var_Period:				.res 2
+;var_Period:				.res 2
 var_CustomPatchPtr:     .res 2
 .endif
 
@@ -351,7 +351,8 @@ var_ch_PrevFreqHighMMC5: .res 2					    ; MMC5
 var_ch_vrc7_CustomPatch: .res 1						; Keep track of the custom patch
 var_ch_vrc7_Patch:		 .res 6						; VRC7 patch
 var_ch_vrc7_DefPatch:	 .res 6
-var_ch_vrc7_Fnum:		 .res 6 * 2
+var_ch_vrc7_FnumLo:		 .res 6
+var_ch_vrc7_FnumHi:		 .res 6
 var_ch_vrc7_Bnum:		 .res 6
 var_ch_vrc7_ActiveNote:	 .res 6
 var_ch_vrc7_Command:	 .res 6						; 0 = halt, 1 = trigger, 80 = update
