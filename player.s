@@ -24,12 +24,17 @@ ft_music_play:
 	bne @ChanLoop
 	; Speed division
 	lda var_Tempo_Accum + 1
-	bmi ft_do_row_update				; Counter has reached bottom
+	bmi ft_do_row_update				; Counter < 0
 	ora var_Tempo_Accum
-	beq ft_do_row_update				; Counter has reached bottom
+	beq ft_do_row_update				; Counter = 0
 	jmp ft_skip_row_update
 	; Read a row
 ft_do_row_update:
+
+.ifdef USE_DPCM
+	lda #$00
+	sta var_ch_DPCM_Retrig
+.endif
 
 	; Switches to new frames are delayed to next row to resolve issues with delayed notes.
 	; It won't work if new pattern adresses are loaded before the delayed note is played
@@ -78,8 +83,10 @@ ft_read_channels:
 	; Yes, skip
 	sec
 	sbc #$01
+.ifdef ENABLE_ROW_SKIP
 	; Store next row number in Temp2
-	sta var_Temp2
+	sta var_SkipTo
+.endif
 	inc var_Current_Frame
 	lda var_Current_Frame
 	cmp var_Frame_Count
@@ -127,10 +134,25 @@ ft_skip_row_update:
 	lda var_Tempo_Accum + 1
 	sbc var_Tempo_Count + 1
 	sta var_Tempo_Accum + 1
-	; Update channel instruments
+
+	; Note cut effect (Sxx)
+	ldx #$00
+:	lda var_ch_NoteCut, x
+	beq :+
+	sec
+	sbc #$01
+;	brk
+	sta var_ch_NoteCut, x
+	bne :+
+	sta var_ch_Note, x
+:	inx
+	cpx #CHANNELS
+	bne :--
+
+	; Update channel instruments and effects
 	ldx #$00
 
-; Loop through 2A03 channels
+; Loop through wave channels
 ft_loop_channels:
 
 	; Do channel effects, like portamento and vibrato
@@ -138,14 +160,13 @@ ft_loop_channels:
 	
 	; Instrument sequences
 	lda var_ch_Note, x
-	beq @SkipChannelUpdate
-	jsr ft_update_channel				; Update instruments
-@SkipChannelUpdate:
-	
-	jsr	ft_calc_freq
+	beq :+
+	jsr ft_update_channel				; Update instruments	
+:	jsr	ft_calc_freq
 	
 	inx
-	cpx #WAVE_CHANS		; Skip DPCM
+	;cpx #WAVE_CHANS		; Skip DPCM
+	cpx #EFF_CHANS
 	bne ft_loop_channels
 	
 	; Finally update APU and expansion chip registers
@@ -156,6 +177,12 @@ ft_loop_channels:
 .ifdef USE_MMC5
 	jsr	ft_update_mmc5
 .endif
+.ifdef USE_VRC7
+	jsr ft_update_vrc7
+.endif
+.ifdef USE_FDS
+	jsr ft_update_fds
+.endif
 
 	; End of music routine, return
 	rts
@@ -163,13 +190,13 @@ ft_loop_channels:
 	
 ; Process a pattern row in channel X
 ft_read_pattern:
-	lda var_ch_NoteDelay, x				; First check if in the middle of a row delay
-	beq @NoRowDelay
-	dec var_ch_NoteDelay, x				; Decrease one
+	ldy var_ch_NoteDelay, x				; First check if in the middle of a row delay
+	beq :+
+	dey
+	tya
+	sta var_ch_NoteDelay, x
 	rts									; And skip
-@NoRowDelay:
-	sta var_Sweep						; A = 0
-	tay									; Y = 0
+:	sty var_Sweep						; Y = 0
 .ifdef USE_BANKSWITCH
 	; First setup the bank
 	lda var_ch_Bank, x
@@ -178,6 +205,12 @@ ft_read_pattern:
 :	; Go on
 .endif
 	lda #$0F
+.ifdef USE_FDS
+	cpx #FDS_CHANNEL
+	bne :+
+	lda #$1F							; FDS max vol is 31
+:
+.endif
 	sta var_VolTemp
 	lda var_ch_Pattern_addr, x			; Load pattern address
 	sta var_Temp_Pattern
@@ -185,27 +218,41 @@ ft_read_pattern:
 	sta var_Temp_Pattern + 1
 	
 ft_read_note:
-	lda (var_Temp_Pattern), y
-	bmi @Effect							; Effect
-	beq @JumpToDone						; Rest
-	cmp #$7F							
+	lda (var_Temp_Pattern), y			; Read pattern command
+	bpl :+
+	jmp @Effect
+:	beq @JumpToDone						; Rest
+	cmp #$7F
 	beq @NoteOff						; Note off
-	;cmp #$7E
-	;beq 								; Note release
-	; A real note
+	cmp #$7E
+	beq @NoteRelease					; Note release
+	; Read a note
 	sta var_ch_Note, x					; Note on
 	jsr ft_translate_freq
+	lda #$00
+	sta var_ch_NoteCut, x
 .ifdef USE_DPCM
 	cpx #DPCM_CHANNEL					; Break here if DPCM
-	bne :+	
+	bne :+
 	jmp @ReadIsDone
 :	; DPCM skip
 .endif
+.ifdef USE_VRC7
+	cpx #VRC7_CHANNEL
+	bcc :+								; <
+	cpx #VRC7_CHANNEL + 6
+	bcs :+								; >
+	jsr ft_vrc7_trigger
+	jmp @ReadIsDone
+:	; VRC7 skip
+.endif
 	jsr ft_reset_instrument
+	lda #$00
+	sta var_ch_State, x
 	lda var_VolTemp
 	sta var_ch_Volume, x
 	lda #$00
-	sta var_ch_ArpeggioCycle, x
+;	sta var_ch_ArpeggioCycle, x
 	
 	lda var_ch_DutyCycle, x
 	and #$F0
@@ -218,17 +265,35 @@ ft_read_note:
 	sta var_ch_DutyCycle, x
 
 	cpx #$02							; Skip if not square
-	bcs @ReadIsDone
-	lda #$00
+	bcc :+
+	jmp @ReadIsDone
+:	lda #$00
 	sta var_ch_Sweep, x					; Reset sweep
 @JumpToDone:
+	jmp @ReadIsDone
+@NoteRelease:
+	lda #$01
+	sta var_ch_State, x
+	jsr ft_instrument_release
 	jmp @ReadIsDone
 @NoteOff:
 	lda #$00
 	sta var_ch_Note, x
 .ifdef USE_DPCM
-	cpx #DPCM_CHANNEL					; Skip DPCM
-	beq :+
+	cpx #DPCM_CHANNEL					; Skip if DPCM
+	bne :+
+	jmp @ReadIsDone
+:
+.endif
+.ifdef USE_VRC7
+	cpx #VRC7_CHANNEL					; Skip if not VRC7 channel
+	bcc :+
+	cpx #VRC7_CHANNEL + 6
+	bcs :+
+	lda #$00							; Halt VRC7 channel
+	sta var_ch_Command - VRC7_CHANNEL, x
+	jmp @ReadIsDone
+:
 .endif
 	sta var_ch_Volume, x
 	sta var_ch_PortaTo, x
@@ -293,15 +358,15 @@ ft_read_is_done:
 	lda #$00
 	adc var_Temp_Pattern + 1
 	sta var_ch_Pattern_addr + CHANNELS, x
-	
-	
+
+
 	;rts
 	lda var_Sweep						; Check sweep
 	beq @EndPatternFetch
 	sta var_ch_Sweep, x					; Store sweep, only used for square 1 and 2
 	lda #$00
 	sta var_Sweep
-	sta var_ch_PrevFreqHigh, x	
+	sta var_ch_PrevFreqHigh, x
 @EndPatternFetch:
 	rts
 
@@ -338,6 +403,8 @@ ft_command_table:
 	.word ft_cmd_slide_up
 	.word ft_cmd_slide_down
 	.word ft_cmd_vol_slide
+	.word ft_cmd_note_cut
+	.word ft_cmd_retrigger
 	.word ft_cmd_duration
 	.word ft_cmd_noduration
 ;	.word ft_cmd_expand
@@ -444,6 +511,12 @@ ft_cmd_porta_up:
 	sta var_ch_EffParam, x
 	beq ResetEffect
 	lda #EFF_PORTA_UP
+.ifdef USE_FDS
+	cpx #FDS_CHANNEL
+	bne :+
+	lda #EFF_PORTA_DOWN
+:
+.endif
 	sta var_ch_Effect, x
 	jmp ft_read_note
 ; Effect: Portamento down (2xx)
@@ -452,7 +525,13 @@ ft_cmd_porta_down:
 	sta var_ch_EffParam, x
 	beq ResetEffect
 	lda #EFF_PORTA_DOWN
-	sta var_ch_Effect, x	
+.ifdef USE_FDS
+	cpx #FDS_CHANNEL
+	bne :+
+	lda #EFF_PORTA_UP
+:
+.endif
+	sta var_ch_Effect, x
 	jmp ft_read_note
 ; Effect: Arpeggio (0xy)
 ft_cmd_arpeggio:
@@ -466,7 +545,7 @@ ResetEffect:					; Shared by 0, 1, 2, 3
 	sta var_ch_Effect, x
 	sta var_ch_PortaTo, x
 	sta var_ch_PortaTo + WAVE_CHANS, x
-	jmp ft_read_note	
+	jmp ft_read_note
 ; Effect: Hardware sweep (Hxy / Ixy)
 ft_cmd_sweep:
 	jsr ft_get_pattern_byte
@@ -476,30 +555,40 @@ ft_cmd_sweep:
 ft_cmd_vibrato:
 	jsr ft_get_pattern_byte
 	pha
-	lsr a						; Get vibrato speed, found in the high nybble
-	lsr a
-	lsr a
-	lsr a
-	sta var_ch_VibratoSpeed, x
+
+	lda var_ch_VibratoSpeed, x
+	bne :++
+	;lda var_VibratoOffset
+	lda var_SongFlags
+	and #$02
+	beq :+
+	lda #48
+:
+	sta var_ch_VibratoPos, x	
+:	pla
+
+	pha
+	and #$F0
+	sta var_ch_VibratoDepth, x
 	pla
-	sta var_ch_VibratoParam, x
-	cmp #$00
-	beq @ResetVibrato
+	and #$0F
+	sta var_ch_VibratoSpeed, x
+;	cmp #$00
+;	beq @ResetVibrato
 	jmp ft_read_note
-@ResetVibrato:					; Clear vibrato
-	sta var_ch_VibratoPos, x
-	jmp ft_read_note
+;@ResetVibrato:					; Clear vibrato
+;	lda var_VibratoOffset
+;	sta var_ch_VibratoPos, x
+;	jmp ft_read_note
 ; Effect: Tremolo (7xy)
 ft_cmd_tremolo:
 	jsr ft_get_pattern_byte
 	pha
-	lsr a						; Get tremolo speed, found in the high nybble
-	lsr a
-	lsr a
-	lsr a
-	sta var_ch_TremoloSpeed, x
+	and #$F0
+	sta var_ch_TremoloDepth, x
 	pla
-	sta var_ch_TremoloParam, x
+	and #$0F
+	sta var_ch_TremoloSpeed, x
 	cmp #$00
 	beq @ResetTremolo
 	jmp ft_read_note
@@ -544,7 +633,7 @@ ft_cmd_sample_offset:
 .endif
 	jmp ft_read_note
 ; Effect: Slide pitch up
-ft_cmd_slide_up:	
+ft_cmd_slide_up:
 	jsr ft_get_pattern_byte			; Fetch speed / note
 	sta var_ch_EffParam, x
 	lda #EFF_SLIDE_UP_LOAD
@@ -562,6 +651,22 @@ ft_cmd_vol_slide:
 	jsr ft_get_pattern_byte			; Fetch speed / note
 	sta var_ch_VolSlide, x
 	jmp ft_read_note
+; Effect: Note cut (Sxx)
+ft_cmd_note_cut:
+	jsr ft_get_pattern_byte
+	sta var_ch_NoteCut, x
+	jmp ft_read_note
+; Effect: Retrigger
+ft_cmd_retrigger:
+	jsr ft_get_pattern_byte
+.ifdef USE_DPCM
+	sta var_ch_DPCM_Retrig
+	lda var_ch_DPCM_RetrigCntr
+	bne :+
+	lda var_ch_DPCM_Retrig
+	sta var_ch_DPCM_RetrigCntr
+.endif
+:	jmp ft_read_note
 ; End of effect column commands
 ; Set default note duration
 ft_cmd_duration:
@@ -581,16 +686,15 @@ ft_cmd_noduration:
 .ifdef USE_VRC6
 ft_load_vrc6_saw_table:
 	cpx #SAW_CHANNEL
-	bne @SkipSawSetting
-	pha
+	bne :+
+	pha						; Load VRC6 sawtooth table
 	lda #<ft_periods_sawtooth
 	sta var_Note_Table
 	lda #>ft_periods_sawtooth
 	sta var_Note_Table + 1
 	pla
 	rts
-@SkipSawSetting:
-	pha
+:	pha						; Load 2A03 table
 	lda #<ft_notes_ntsc
 	sta var_Note_Table
 	lda #>ft_notes_ntsc
@@ -599,15 +703,51 @@ ft_load_vrc6_saw_table:
 	rts
 .endif
 
+.ifdef USE_FDS
+ft_load_fds_table:
+	cpx #FDS_CHANNEL
+	bne :+
+	pha
+	lda #<ft_periods_fds		; Load FDS table
+	sta var_Note_Table
+	lda #>ft_periods_fds
+	sta var_Note_Table + 1
+	pla
+	rts
+:	pha
+	lda	#<ft_notes_ntsc			; Load 2A03 table
+	sta var_Note_Table
+	lda #>ft_notes_ntsc
+	sta var_Note_Table + 1
+	pla
+	rts
+.endif
+
 ft_translate_freq_only:
+
 	sec
 	sbc #$01
 
+.ifdef USE_VRC7
+	cpx	#VRC7_CHANNEL
+	bcc :+
+	sta var_ch_ActiveNote - VRC7_CHANNEL, x
+	jsr ft_vrc7_get_freq_only
+	rts
+:
+.endif
+
+
 	cpx #NOISE_CHANNEL							; Check if noise
 	beq StoreNoise
+
 .ifdef USE_VRC6
 	jsr	ft_load_vrc6_saw_table
-.endif	
+.endif
+.ifdef USE_FDS
+	jsr ft_load_fds_table
+.endif
+
 	asl a
 	sty var_Temp
 	tay
@@ -616,27 +756,43 @@ LoadFrequency:
 	sta var_ch_TimerPeriod, x
 	iny
 	lda (var_Note_Table), y
-	sta var_ch_TimerPeriod + WAVE_CHANS, x
+	sta var_ch_TimerPeriod + EFF_CHANS, x
 	ldy var_Temp
 	rts
-	
+
 ; Translate the note in A to a frequency and stores in current channel
+; If portamento is enabled, store in PortaTo
 ft_translate_freq:
+
 	sec
 	sbc #$01
-
-	cpx #NOISE_CHANNEL				; Check if noise
-	beq StoreNoise
 
 .ifdef USE_DPCM
 	cpx #DPCM_CHANNEL				; Check if DPCM
 	beq StoreDPCM
 .endif
-	
+
+.ifdef USE_VRC7
+	cpx #VRC7_CHANNEL
+	bcc :+
+;	clc
+;	adc #$01						; todo: remove this eventually
+	sta var_ch_ActiveNote - VRC7_CHANNEL, x
+	jsr ft_vrc7_get_freq
+	rts
+:
+.endif
+
+	cpx #NOISE_CHANNEL				; Check if noise
+	beq StoreNoise
+
 .ifdef USE_VRC6
 	jsr	ft_load_vrc6_saw_table
 .endif
-	
+.ifdef USE_FDS
+	jsr ft_load_fds_table
+.endif
+
 	asl a
 	sty var_Temp
 	tay
@@ -650,15 +806,15 @@ ft_translate_freq:
 	sta var_ch_PortaTo, x
 	iny
 	lda (var_Note_Table), y
-	sta var_ch_PortaTo + WAVE_CHANS, x
+	sta var_ch_PortaTo + EFF_CHANS, x
 	ldy var_Temp
 	lda var_ch_TimerPeriod, x
-	ora var_ch_TimerPeriod + WAVE_CHANS, x
+	ora var_ch_TimerPeriod + EFF_CHANS, x
 	bne @Return
 	lda var_ch_PortaTo, x
 	sta var_ch_TimerPeriod, x
-	lda var_ch_PortaTo + WAVE_CHANS, x
-	sta var_ch_TimerPeriod + WAVE_CHANS, x
+	lda var_ch_PortaTo + EFF_CHANS, x
+	sta var_ch_TimerPeriod + EFF_CHANS, x
 @Return:
 	rts
 @NoPorta:
@@ -666,6 +822,8 @@ ft_translate_freq:
 	rts
 StoreNoise:							; Special case for noise
 	sta var_ch_TimerPeriod, x
+	lda #$00
+	sta var_ch_TimerPeriod + EFF_CHANS, x
 	rts
 
 .ifdef USE_DPCM
@@ -701,10 +859,19 @@ StoreDPCM:							; Special case for DPCM
 	rts
 .endif
 
-.ifdef USE_VRC6
-StoreSawtooth:
-	rts
-.endif
+;.ifdef USE_VRC6
+;StoreSawtooth:
+;	rts
+;.endif
+
+;.ifdef USE_VRC7
+;ft_translate_vrc7:
+;	lda #172
+;	sta var_ch_TimerPeriod, x
+;	lda #$04
+;	sta var_ch_TimerPeriod + SFX_CHANS, x
+;	rts
+;.endif
 
 ; Reload speed division counter
 ft_restore_speed:
@@ -746,7 +913,7 @@ ft_calculate_speed:
 	tya
 	adc AUX + 1
 	sta ACC + 1
-		
+
 	; divide by speed
 	lda var_Speed
 	sta AUX
@@ -758,7 +925,8 @@ ft_calculate_speed:
 	lda ACC + 1
 	sta var_Tempo_Count + 1
 	pla
-	tay
+    tay
+
 	rts
 
 ; If anyone knows a way to calculate speed without using

@@ -28,7 +28,7 @@ ft_update_vrc6:
 	sta $9000
 	lda	var_ch_TimerCalculated + VRC6_CH1
 	sta $9001
-	lda	var_ch_TimerCalculated + VRC6_CH1 + WAVE_CHANS
+	lda	var_ch_TimerCalculated + VRC6_CH1 + EFF_CHANS
 	ora #$80
 	sta $9002
 	bmi @VRC6_Chan2
@@ -63,7 +63,7 @@ ft_update_vrc6:
 	sta $A000
 	lda	var_ch_TimerCalculated + VRC6_CH2
 	sta $A001
-	lda	var_ch_TimerCalculated + VRC6_CH2 + WAVE_CHANS
+	lda	var_ch_TimerCalculated + VRC6_CH2 + EFF_CHANS
 	ora #$80
 	sta $A002
 	bmi @VRC6_Chan3
@@ -97,7 +97,7 @@ ft_update_vrc6:
 	sta $B000
 	lda	var_ch_TimerCalculated + VRC6_CH3
 	sta $B001
-	lda	var_ch_TimerCalculated + VRC6_CH3 + WAVE_CHANS
+	lda	var_ch_TimerCalculated + VRC6_CH3 + EFF_CHANS
 	ora #$80
 	sta $B002
 	rts

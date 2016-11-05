@@ -2,6 +2,44 @@
 ; Updates the APU registers. x and y are free to use
 ;
 
+.if 0
+; Found this on nesdev bbs by blargg, 
+; this can replace the volume table but takes a little more CPU
+ft_get_volume:
+
+	lda var_ch_VolColumn, x
+	lsr a
+	lsr a
+	lsr a
+	sta var_Temp
+	lda var_ch_OutVolume, x
+	sta var_Temp2
+
+    lda var_Temp				; 4x4 multiplication
+    lsr var_Temp2
+    bcs :+
+    lsr a
+:   lsr var_Temp2
+    bcc :+
+    adc var_Temp
+:   lsr a
+    lsr var_Temp2
+    bcc :+
+    adc var_Temp
+:   lsr a
+    lsr var_Temp2
+    bcc :+
+    adc var_Temp
+:   lsr a
+	beq :+
+	rts
+:	lda var_Temp
+	ora var_ch_OutVolume, x
+	beq :+
+	lda #$01					; Round up to 1
+:	rts
+.endif
+
 ft_update_apu:
 	lda var_PlayerFlags
 	bne @Play
@@ -24,20 +62,27 @@ ft_update_apu:
 	bne :+
 	jmp @Square2
 :
-	
 	lda var_ch_Note				; Kill channel if note = off
 	beq @KillSquare1
+	
+	; Calculate volume
+.if 0
+	ldx #$00
+	jsr ft_get_volume
+	beq @KillSquare1
+.endif
 	; Calculate volume	
-	lda var_ch_VolColumn		; Kill channel if volume column = 0
+	lda var_ch_VolColumn + 0		; Kill channel if volume column = 0
 	asl a
 	and #$F0
 	beq @KillSquare1
 	sta var_Temp
-	lda var_ch_OutVolume		; Kill channel if volume = 0
+	lda var_ch_OutVolume + 0
 	beq @KillSquare1
 	ora var_Temp
 	tax
 	lda ft_volume_table, x
+
 	; Write to registers
 	pha 
 	lda var_ch_DutyCycle
@@ -48,11 +93,11 @@ ft_update_apu:
 	ora #$30					; And disable length counter and envelope
 	sta $4000
 	; Period table isn't limited to $7FF anymore
-	lda var_ch_TimerCalculated + WAVE_CHANS
+	lda var_ch_TimerCalculated + EFF_CHANS
 	and #$F8
 	beq @TimerOverflow1
-	lda #$03
-	sta var_ch_TimerCalculated + WAVE_CHANS
+	lda #$07
+	sta var_ch_TimerCalculated + EFF_CHANS
 	lda #$FF
 	sta var_ch_TimerCalculated
 @TimerOverflow1:
@@ -69,7 +114,7 @@ ft_update_apu:
 	
 	lda var_ch_TimerCalculated
 	sta $4002
-	lda var_ch_TimerCalculated + WAVE_CHANS
+	lda var_ch_TimerCalculated + EFF_CHANS
 	sta $4003
 
 	lda #$FF
@@ -77,22 +122,25 @@ ft_update_apu:
 	
 ;	jsr @KillSweepUnit
 	jmp @Square2
+
+@KillSquare1:
+	lda #$30
+	sta $4000
+	jmp @Square2
+	
 @NoSquare1Sweep:				; No Sweep
 	lda #$08
 	sta $4001
 	jsr @KillSweepUnit
 	lda var_ch_TimerCalculated
 	sta $4002
-	lda var_ch_TimerCalculated + WAVE_CHANS
+	lda var_ch_TimerCalculated + EFF_CHANS
 	cmp var_ch_PrevFreqHigh
 	beq @SkipHighPartSq1
 	sta $4003
 	sta var_ch_PrevFreqHigh
 @SkipHighPartSq1:
-	jmp @Square2
-@KillSquare1:
-	lda #$30
-	sta $4000
+;	jmp @Square2
 
 	;
 	; Square 2
@@ -103,9 +151,10 @@ ft_update_apu:
 	bne :+
 	jmp @Triangle
 :
-	
 	lda var_ch_Note + 1
 	beq @KillSquare2
+	
+	.if 1
 	; Calculate volume	
 	lda var_ch_VolColumn + 1		; Kill channel if volume column = 0
 	asl a
@@ -117,6 +166,14 @@ ft_update_apu:
 	ora var_Temp
 	tax
 	lda ft_volume_table, x
+	.endif
+
+	.if 0	
+	ldx #$01
+	jsr ft_get_volume
+	beq @KillSquare2
+	.endif
+	
 	; Write to registers
 	pha 
 	lda var_ch_DutyCycle + 1
@@ -127,11 +184,11 @@ ft_update_apu:
 	ora #$30
 	sta $4004
 	; Period table isn't limited to $7FF anymore
-	lda var_ch_TimerCalculated + 1 + WAVE_CHANS
+	lda var_ch_TimerCalculated + 1 + EFF_CHANS
 	and #$F8
 	beq @TimerOverflow2
-	lda #$03
-	sta var_ch_TimerCalculated + 1 + WAVE_CHANS
+	lda #$07
+	sta var_ch_TimerCalculated + 1 + EFF_CHANS
 	lda #$FF
 	sta var_ch_TimerCalculated + 1
 @TimerOverflow2:
@@ -148,7 +205,7 @@ ft_update_apu:
 	sta var_ch_PrevFreqHigh + 1
 	lda var_ch_TimerCalculated + 1	; Could this be done by that below? I don't know
 	sta $4006
-	lda var_ch_TimerCalculated + WAVE_CHANS + 1
+	lda var_ch_TimerCalculated + EFF_CHANS + 1
 	sta $4007
 ;	jsr @KillSweepUnit
 	jmp @Triangle
@@ -158,7 +215,7 @@ ft_update_apu:
 	jsr @KillSweepUnit
 	lda var_ch_TimerCalculated + 1
 	sta $4006
-	lda var_ch_TimerCalculated + WAVE_CHANS + 1
+	lda var_ch_TimerCalculated + EFF_CHANS + 1
 	cmp var_ch_PrevFreqHigh + 1
 	beq @SkipHighPartSq2
 	sta $4007
@@ -178,17 +235,17 @@ ft_update_apu:
 	;
 	lda var_ch_Volume + 2
 	beq @KillTriangle
-	;lda var_ch_Note + 2
-	ora var_ch_Note + 2
+	lda var_ch_Note + 2
+	;ora var_ch_Note + 2
 	beq @KillTriangle
 	lda #$81
 	sta $4008
 	; Period table isn't limited to $7FF anymore
-	lda var_ch_TimerCalculated + 2 + WAVE_CHANS
+	lda var_ch_TimerCalculated + 2 + EFF_CHANS
 	and #$F8
 	beq @TimerOverflow3
-	lda #$03
-	sta var_ch_TimerCalculated + 2 + WAVE_CHANS
+	lda #$07
+	sta var_ch_TimerCalculated + 2 + EFF_CHANS
 	lda #$FF
 	sta var_ch_TimerCalculated + 2
 @TimerOverflow3:	
@@ -196,7 +253,7 @@ ft_update_apu:
 	sta $4009
 	lda var_ch_TimerCalculated + 2
 	sta $400A
-	lda var_ch_TimerCalculated + WAVE_CHANS + 2
+	lda var_ch_TimerCalculated + EFF_CHANS + 2
 	sta $400B
 	jmp @SkipTriangleKill
 @KillTriangle:
@@ -214,7 +271,8 @@ ft_update_apu:
 		
 	lda var_ch_Note + 3
 	beq @KillNoise
-	; Calculate volume	
+	; Calculate volume
+	.if 1
 	lda var_ch_VolColumn + 3		; Kill channel if volume column = 0
 	asl a
 	and #$F0
@@ -225,13 +283,18 @@ ft_update_apu:
 	ora var_Temp
 	tax
 	lda ft_volume_table, x
+	.endif
+;	ldx #$03
+;	jsr ft_get_volume
+;	beq @KillNoise
+
 	; Write to registers
 	ora #$30
 	sta $400C
 	lda #$00
 	sta $400D
 	lda var_ch_DutyCycle + 3
-	and #$01
+;	and #$01
 	ror a
 	ror a
 	and #$80
@@ -255,6 +318,15 @@ ft_update_apu:
 	lda var_Channels
 	and #$10
 	beq @Return
+	
+	lda var_ch_DPCM_Retrig			; Retrigger
+	beq :+
+	dec var_ch_DPCM_RetrigCntr
+	bne :+
+	sta var_ch_DPCM_RetrigCntr
+	lda #$01
+	sta var_ch_Note + DPCM_CHANNEL
+:
 	
 	lda var_ch_DPCMDAC				; See if delta counter should be updated
 	bmi @SkipDAC
@@ -296,7 +368,8 @@ ft_update_apu:
 @Return:
 	rts
 
-; Lookup table
+; Lookup tables
+
 ft_duty_table:
 	.byte $00, $40, $80, $C0
 
@@ -318,5 +391,3 @@ ft_volume_table:
  	.byte 0, 1, 1, 2, 3, 4, 5, 6, 6, 7, 8, 9, 10, 11, 12, 13 
  	.byte 0, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 
  	.byte 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 
- 
- 

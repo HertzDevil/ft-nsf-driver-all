@@ -5,11 +5,17 @@
 ft_return:
 	rts
 ft_update_channel:
-;	cpx #$04
-;	beq ft_return
+.ifdef USE_VRC7
+	cpx #VRC7_CHANNEL
+	bcc :+
+	cpx #VRC7_CHANNEL + 6
+	bcs :+
+	rts
+:
+.endif
 	; Volume
 	;
-	lda var_ch_SeqVolume + WAVE_CHANS, x
+	lda var_ch_SeqVolume + SFX_WAVE_CHANS, x	; High part of address = 0 mean sequence is disabled
 	beq @SkipVolumeUpdate
 	sta var_Temp_Pointer + 1
 	lda var_ch_SeqVolume, x					; Store the sequence address in a zp variable
@@ -22,9 +28,10 @@ ft_update_channel:
 	lda var_sequence_result					; Take care of the result
 	sta var_ch_Volume, x
 @SkipVolumeUpdate:
+
 	; Arpeggio
 	;
-	lda var_ch_SeqArpeggio + WAVE_CHANS, x
+	lda var_ch_SeqArpeggio + SFX_WAVE_CHANS, x
 	beq @SkipArpeggioUpdate
 	sta var_Temp_Pointer + 1
 	lda var_ch_SeqArpeggio, x
@@ -41,9 +48,10 @@ ft_update_channel:
 	adc var_sequence_result
 	jsr ft_translate_freq_only
 @SkipArpeggioUpdate:
+
 	; Pitch bend
 	;
-	lda var_ch_SeqPitch + WAVE_CHANS, x
+	lda var_ch_SeqPitch + SFX_WAVE_CHANS, x
 	beq @SkipPitchUpdate
 	sta var_Temp_Pointer + 1
 	lda var_ch_SeqPitch, x
@@ -66,8 +74,8 @@ ft_update_channel:
 @NoNegativePitch:
 	lda #$00
 @LoadLowPitch:
-	adc var_ch_TimerPeriod + WAVE_CHANS, x
-	sta var_ch_TimerPeriod + WAVE_CHANS, x
+	adc var_ch_TimerPeriod + EFF_CHANS, x
+	sta var_ch_TimerPeriod + EFF_CHANS, x
 	jsr ft_limit_freq
 	; ^^^^^^^^^^
 
@@ -75,7 +83,7 @@ ft_update_channel:
 @SkipPitchUpdate:
 	; HiPitch bend
 	;
-	lda var_ch_SeqHiPitch + WAVE_CHANS, x
+	lda var_ch_SeqHiPitch + SFX_WAVE_CHANS, x
 	beq @SkipHiPitchUpdate
 	sta var_Temp_Pointer + 1
 	lda var_ch_SeqHiPitch, x
@@ -99,27 +107,26 @@ ft_update_channel:
 	sta var_Temp16 + 1
 @StoreHiPitch:
 	ldy #$04
-@MultiplyByTen:
-	clc
+:	clc
 	rol var_Temp16 						; multiply by 2
 	rol var_Temp16 + 1
 	dey
-	bne @MultiplyByTen
+	bne :-
 	
 	clc	
 	lda var_Temp16
 	adc var_ch_TimerPeriod, x
 	sta var_ch_TimerPeriod, x
 	lda var_Temp16 + 1
-	adc var_ch_TimerPeriod + WAVE_CHANS, x
-	sta var_ch_TimerPeriod + WAVE_CHANS, x
-	jsr ft_limit_freq	
+	adc var_ch_TimerPeriod + EFF_CHANS, x
+	sta var_ch_TimerPeriod + EFF_CHANS, x
+	jsr ft_limit_freq
 	; ^^^^^^^^^^
 
 @SkipHiPitchUpdate:
 	; Duty cycle/noise mode
 	;
-	lda var_ch_SeqDutyCycle + WAVE_CHANS, x
+	lda var_ch_SeqDutyCycle + SFX_WAVE_CHANS, x
 	beq @SkipDutyUpdate
 	sta var_Temp_Pointer + 1
 	lda var_ch_SeqDutyCycle, x
@@ -136,36 +143,135 @@ ft_update_channel:
 	rts
 	
 	
-; Process an item in a sequence, next position is returned in A, result in Y (not anymore)
+;
+; Process a sequence, next position is returned in A
 ;
 ; In: A = Sequence index
 ; Out: A = New sequence index
 ;
 ft_run_sequence:
 	clc
-	adc #$02						; Offset is 2 items
+	adc #$03						; Offset is 3 items
 	tay
 	lda (var_Temp_Pointer), y
 	sta var_sequence_result
+	dey
 	dey
 	tya
 	ldy #$00						; Check if halt point
 	cmp (var_Temp_Pointer), y
 	beq @HaltSequence
+	ldy #$02						; Check release point
+	cmp (var_Temp_Pointer), y
+	beq @ReleasePoint
 	rts
 @HaltSequence:						; Stop the sequence
-	iny						
+	iny
 	lda (var_Temp_Pointer), y		; Check loop point
 	cmp #$FF
 	bne @LoopSequence
 	lda #$FF						; Disable sequence by loading $FF into length
 	rts
+@Skip:
+	lda	var_Temp
 @LoopSequence:						; Just return A
+    pha
+	lda var_ch_State, x
+	bne :+
+	pla
+	rts								; Return new index
+:	ldy #$02						; Check release point
+	lda (var_Temp_Pointer), y
+	bne :+
+	pla								; Release point not found, loop
+ 	rts
+:	pla								; Release point found, don't loop
+	lda #$FF
+	rts
+@ReleasePoint:						; Release point has been reached
+	sta	var_Temp					; Save index
+	lda var_ch_State, x
+	bne @Skip						; Note is releasing, continue until end
+	dey
+	lda (var_Temp_Pointer), y		; Check loop point
+	cmp #$FF
+	bne @LoopSequence
+	lda var_Temp
+	sec								; Step back one step
+	sbc #$01
+	rts
+
+; Called on note release instruction
+;
+ft_instrument_release:
+    tya
+    pha
+	lda var_ch_SeqVolume + SFX_WAVE_CHANS, x
+	beq :+
+	sta var_Temp_Pointer + 1
+	lda var_ch_SeqVolume, x
+	sta var_Temp_Pointer
+	ldy #$02
+	lda (var_Temp_Pointer), y
+	beq :+
+	sta var_ch_SequencePtr1, x
+:	lda var_ch_SeqArpeggio + SFX_WAVE_CHANS, x
+	beq :+
+	sta var_Temp_Pointer + 1
+	lda var_ch_SeqArpeggio, x
+	sta var_Temp_Pointer
+	ldy #$02
+	lda (var_Temp_Pointer), y
+	beq :+
+	sta var_ch_SequencePtr2, x
+:	lda var_ch_SeqPitch + SFX_WAVE_CHANS, x
+	beq :+
+	sta var_Temp_Pointer + 1
+	lda var_ch_SeqPitch, x
+	sta var_Temp_Pointer
+	ldy #$02
+	lda (var_Temp_Pointer), y
+	beq :+
+	sta var_ch_SequencePtr3, x
+:	lda var_ch_SeqHiPitch + SFX_WAVE_CHANS, x
+	beq :+
+	sta var_Temp_Pointer + 1
+	lda var_ch_SeqHiPitch, x
+	sta var_Temp_Pointer
+	ldy #$02
+	lda (var_Temp_Pointer), y
+	beq :+
+	sta var_ch_SequencePtr4, x
+:	lda var_ch_SeqDutyCycle + SFX_WAVE_CHANS, x
+	beq :+
+	sta var_Temp_Pointer + 1
+	lda var_ch_SeqDutyCycle, x
+	sta var_Temp_Pointer
+	ldy #$02
+	lda (var_Temp_Pointer), y
+	beq :+
+	sta var_ch_SequencePtr5, x
+:   pla
+	tay
 	rts
 
 ; Reset instrument sequences
-;	
+;
 ft_reset_instrument:
+
+.ifdef USE_FDS
+	cpx #FDS_CHANNEL
+	bne :+
+	lda var_ch_ModDelay
+	sta var_ch_ModDelayTick
+	lda #$00
+	sta $4085
+	lda #$80
+	sta $4087
+;	rts
+:
+.endif
+
 	lda #$00
 	sta var_ch_SequencePtr1, x
 	sta var_ch_SequencePtr2, x
@@ -174,12 +280,16 @@ ft_reset_instrument:
 	sta var_ch_SequencePtr5, x
 	rts
 
-
 ; Load the instrument in A for channel X (Y must be saved)
 ;
 ; Optimize
 ;
 ft_load_instrument:
+
+.ifdef USE_VRC7
+	sta var_Temp_Inst		; Save current instrument number
+.endif
+
 	sty var_Temp
 	ldy #$00
 
@@ -195,7 +305,7 @@ ft_load_instrument:
 	sta var_Temp16 + 1
 	clc
 
-	; Get the specified instrument
+	; Get the instrument
 	lda (var_Temp16), y
 	adc ft_music_addr
 	sta var_Temp_Pointer
@@ -204,27 +314,120 @@ ft_load_instrument:
 	adc ft_music_addr + 1
 	sta var_Temp_Pointer + 1
 
+.ifdef USE_FDS
+	; FDS instruments
+	cpx #FDS_CHANNEL
+	bne @SkipFDS
+	
+	; Read FDS instrument
+	ldy #$00
+	lda (var_Temp_Pointer), y	; Load wave index
+	iny
+	pha
+	
+	; Load modulation table
+	jsr ft_reset_modtable
+:	
+	lda (var_Temp_Pointer), y
+	pha
+	and #$07
+	sta $4088
+	pla
+	lsr a
+	lsr a
+	lsr a
+	sta $4088
+	iny
+	cpy #$11
+	bne :-
+
+	lda (var_Temp_Pointer), y	; Modulation delay
+	iny
+	sta var_ch_ModDelay
+	lda (var_Temp_Pointer), y	; Modulation depth
+	iny
+	sta var_ch_ModDepth
+	lda (var_Temp_Pointer), y	; Modulation freq low
+	iny
+	sta var_ch_ModRate
+	lda (var_Temp_Pointer), y	; Modulation freq high
+	sta var_ch_ModRate + 1
+	
+	clc
+	lda var_Temp_Pointer
+	adc #$15
+	sta var_Temp16
+	lda var_Temp_Pointer + 1
+	adc #$00
+	sta var_Temp16 + 1
+	
+	pla							; Load wave index
+	
+	jsr ft_load_fds_wave
+	
+	lda var_Temp16
+	sta var_Temp_Pointer
+	lda var_Temp16 + 1
+	sta var_Temp_Pointer + 1
+	
+;	jmp @Return
+@SkipFDS:
+.endif
+
+.ifdef USE_VRC7
+	; VRC7 instruments
+	cpx #VRC7_CHANNEL
+	bcc @SkipVRC7
+	; Read VRC7 instrument
+	ldy #$00
+	lda (var_Temp_Pointer), y		; Load patch number
+	sta var_ch_Patch - VRC7_CHANNEL, x			; vrc7 channel offset
+	bne :++							; Skip custom settings if patch > 0
+	lda var_Temp_Inst
+	cmp var_ch_CustomPatch			; Check if it's the same custom instrument
+	beq :++							; Skip if it is
+	; Load custom instrument regs
+	txa
+	pha
+	ldx #$00
+:	iny
+	lda (var_Temp_Pointer), y		; Load register
+	stx $9010						; Register index
+	sta $9030						; Store the setting
+	inx
+	cpx #$08
+	bne :-
+	pla
+	tax
+	lda var_Temp_Inst
+	sta var_ch_CustomPatch
+: 	;jmp @Return
+	ldy var_Temp
+	rts
+@SkipVRC7:
+.endif
+
 	; var_Temp_Pointer points to instrument data
 	ldy #$00
 	tya
 	sta var_ch_SeqVolume, x
-	sta var_ch_SeqVolume + WAVE_CHANS, x
+	sta var_ch_SeqVolume + SFX_WAVE_CHANS, x
 	sta var_ch_SeqArpeggio, x
-	sta var_ch_SeqArpeggio + WAVE_CHANS, x
+	sta var_ch_SeqArpeggio + SFX_WAVE_CHANS, x
 	sta var_ch_SeqPitch, x
-	sta var_ch_SeqPitch + WAVE_CHANS, x
+	sta var_ch_SeqPitch + SFX_WAVE_CHANS, x
 	sta var_ch_SeqHiPitch, x
-	sta var_ch_SeqHiPitch + WAVE_CHANS, x
+	sta var_ch_SeqHiPitch + SFX_WAVE_CHANS, x
 	sta var_ch_SeqDutyCycle, x
-	sta var_ch_SeqDutyCycle + WAVE_CHANS, x
+	sta var_ch_SeqDutyCycle + SFX_WAVE_CHANS, x
 
 	; Read instrument data
-	lda (var_Temp_Pointer), y		; Read mod switch
-	sta var_Temp2
+	lda (var_Temp_Pointer), y		; sequence switch
+	sta var_Temp3
 	iny
 
 	; Volume
-	ror var_Temp2
+	ror var_Temp3
 	bcc	:+
 	clc
 	lda (var_Temp_Pointer), y
@@ -233,10 +436,11 @@ ft_load_instrument:
 	iny
 	lda (var_Temp_Pointer), y
 	adc ft_music_addr + 1
-	sta var_ch_SeqVolume + WAVE_CHANS, x
+	sta var_ch_SeqVolume + SFX_WAVE_CHANS, x
 	iny
-: 	; Arpeggio
-	ror var_Temp2
+: 	
+	; Arpeggio
+	ror var_Temp3
 	bcc	:+
 	clc
 	lda (var_Temp_Pointer), y
@@ -245,10 +449,11 @@ ft_load_instrument:
 	iny
 	lda (var_Temp_Pointer), y
 	adc ft_music_addr + 1
-	sta var_ch_SeqArpeggio + WAVE_CHANS, x
+	sta var_ch_SeqArpeggio + SFX_WAVE_CHANS, x
 	iny
-:	; Pitch
-	ror var_Temp2
+:	
+	; Pitch
+	ror var_Temp3
 	bcc	:+
 	clc
 	lda (var_Temp_Pointer), y
@@ -257,10 +462,11 @@ ft_load_instrument:
 	iny
 	lda (var_Temp_Pointer), y
 	adc ft_music_addr + 1
-	sta var_ch_SeqPitch + WAVE_CHANS, x
+	sta var_ch_SeqPitch + SFX_WAVE_CHANS, x
 	iny
-:	; Hi-Pitch
-	ror var_Temp2
+:	
+	; Hi-Pitch
+	ror var_Temp3
 	bcc	:+
 	clc
 	lda (var_Temp_Pointer), y
@@ -269,10 +475,11 @@ ft_load_instrument:
 	iny
 	lda (var_Temp_Pointer), y
 	adc ft_music_addr + 1
-	sta var_ch_SeqHiPitch + WAVE_CHANS, x
+	sta var_ch_SeqHiPitch + SFX_WAVE_CHANS, x
 	iny
-:	; Duty cycle
-	ror var_Temp2
+:	
+	; Duty cycle
+	ror var_Temp3
 	bcc	:+
 	clc
 	lda (var_Temp_Pointer), y
@@ -281,9 +488,10 @@ ft_load_instrument:
 	iny
 	lda (var_Temp_Pointer), y
 	adc ft_music_addr + 1
-	sta var_ch_SeqDutyCycle + WAVE_CHANS, x
+	sta var_ch_SeqDutyCycle + SFX_WAVE_CHANS, x
 	iny
 :
+@Return:
 	jsr ft_reset_instrument
 	ldy var_Temp
 	
@@ -291,12 +499,36 @@ ft_load_instrument:
 
 ; Make sure the frequency doesn't exceed max or min
 ft_limit_freq:
-	lda var_ch_TimerPeriod + WAVE_CHANS, x
-	bmi @LimitMin						; min
-	cmp #$08							; max
-	bmi @NoLimit
+	lda var_ch_TimerPeriod + EFF_CHANS, x
+	bmi @LimitMin						; period < 0
+.ifdef USE_VRC6
+	cpx #VRC6_CHANNELS
+	bcc :+
+	cmp #$10							; period > $FFF
+	bcc @NoLimit
+	lda #$0F
+	sta var_ch_TimerPeriod + EFF_CHANS, x
+	lda #$FF
+	sta var_ch_TimerPeriod, x
+	rts
+:
+.endif
+.ifdef USE_FDS
+	cpx #FDS_CHANNEL
+	bne :+
+	cmp #$11							; period > $1000?
+	bcc @NoLimit
+	lda #$10
+	sta var_ch_TimerPeriod + EFF_CHANS, x
+	lda #$FF
+	sta var_ch_TimerPeriod, x
+	rts
+:	
+.endif
+	cmp #$08							; period > $7FF
+	bcc @NoLimit
 	lda #$07
-	sta var_ch_TimerPeriod + WAVE_CHANS, x
+	sta var_ch_TimerPeriod + EFF_CHANS, x
 	lda #$FF
 	sta var_ch_TimerPeriod, x
 @NoLimit:
@@ -304,5 +536,5 @@ ft_limit_freq:
 @LimitMin:
 	lda #$00
 	sta var_ch_TimerPeriod, x
-	sta var_ch_TimerPeriod + WAVE_CHANS, x
+	sta var_ch_TimerPeriod + EFF_CHANS, x
 	rts

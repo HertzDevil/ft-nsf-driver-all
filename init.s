@@ -35,6 +35,23 @@ ft_music_init:
 	lda #$FF		; Enable all channels
 	sta var_Channels
 
+	; Reset some variables for the wave channels
+	lda #$00
+	tax
+:	sta var_ch_NoteCut, x
+	sta var_ch_Effect, x
+	sta var_ch_EffParam, x
+	sta var_ch_PortaTo, x
+	sta var_ch_PortaTo + WAVE_CHANS, x
+	sta var_ch_TimerPeriod, x
+	sta var_ch_TimerPeriod + EFF_CHANS, x
+	inx
+	cpx #WAVE_CHANS
+	bne :-
+
+	; DPCM
+	sta var_ch_NoteCut + (CHANNELS - 1)
+
 .ifdef USE_MMC5
 	lda #$03
 	sta $5015		; Enable channels
@@ -75,15 +92,25 @@ ft_load_song:
 	cpy #$08							; 4 items
 	bne @LoadAddresses
 
-;	lda #$0
-;	sta var_SongFlags
 	lda (var_Temp_Pointer), y			; Flags, 1 byte
 	sta var_SongFlags
 	iny
+
+.ifdef USE_FDS
+	; Load FDS wave table pointer
+	lda (var_Temp_Pointer), y
+	adc ft_music_addr
+	sta var_Wavetables
+	iny
+	lda (var_Temp_Pointer), y
+	adc ft_music_addr + 1
+	sta var_Wavetables + 1
+	iny	
+.endif
 	
 	cpx #$01							; PAL / NTSC flag
 	beq @LoadPAL
- .ifdef NTSC_PERIOD_TABLE
+.ifdef NTSC_PERIOD_TABLE
 	; Load NTSC speed divider and frequency table
 	lda (var_Temp_Pointer), y
 	iny
@@ -119,7 +146,7 @@ ft_load_song:
 	; Load the song
 	jsr ft_load_track
 	
-	; Clear out variables to zero
+	; Clear variables to zero
 	; Important!
 	ldx #$01
 	stx var_PlayerFlags				; Player flags, bit 0 = playing
@@ -130,6 +157,15 @@ ft_load_song:
 	lda #$80
 	sta var_ch_FinePitch, x
 	lda #$00
+	;
+	;lda #$00
+	sta var_ch_VibratoSpeed, x
+	sta var_ch_TremoloSpeed, x
+	sta var_ch_Effect, x
+	sta var_ch_VolSlide, x
+	sta var_ch_NoteDelay, x
+	sta var_ch_ArpeggioCycle, x
+	;
 	sta var_ch_Note, x
 	inx
 	cpx #(CHANNELS - 1)
@@ -142,7 +178,10 @@ ft_load_song:
 .ifdef USE_MMC5
 	stx var_ch_PrevFreqHighMMC5
 	stx var_ch_PrevFreqHighMMC5 + 1
-.endif 
+.endif
+.ifdef USE_VRC7
+	stx var_ch_CustomPatch
+.endif
 	
 	inx								; Jump to the first frame
 	stx var_Current_Frame
@@ -254,7 +293,7 @@ ft_load_frame:
 	lda #$00
 	sta var_ch_NoteDelay, x
 	sta var_ch_Delay, x
-	sta var_ch_LoopCounter, x
+;	sta var_ch_LoopCounter, x
 	lda #$FF
 	sta var_ch_DefaultDelay, x
 	inx
@@ -276,9 +315,9 @@ ft_load_frame:
 @SkipBankValues:
 .endif
 
-.ifdef ENABLE_SKIP_ROWS
+.ifdef ENABLE_ROW_SKIP
 	
-	lda var_Temp2
+	lda var_SkipTo
 	beq @FirstRow
 	jmp ft_SkipToRow
 @FirstRow:
