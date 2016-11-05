@@ -2,10 +2,14 @@
 ;
 ; I might consider storing the sequence address variables in ZP??
 ;
+ft_return:
+	rts
 ft_update_channel:
+;	cpx #$04
+;	beq ft_return
 	; Volume
 	;
-	lda var_ch_SeqVolume + 4, x
+	lda var_ch_SeqVolume + WAVE_CHANS, x
 	beq @SkipVolumeUpdate
 	sta var_Temp_Pointer + 1
 	lda var_ch_SeqVolume, x					; Store the sequence address in a zp variable
@@ -20,7 +24,7 @@ ft_update_channel:
 @SkipVolumeUpdate:
 	; Arpeggio
 	;
-	lda var_ch_SeqArpeggio + 4, x
+	lda var_ch_SeqArpeggio + WAVE_CHANS, x
 	beq @SkipArpeggioUpdate
 	sta var_Temp_Pointer + 1
 	lda var_ch_SeqArpeggio, x
@@ -39,7 +43,7 @@ ft_update_channel:
 @SkipArpeggioUpdate:
 	; Pitch bend
 	;
-	lda var_ch_SeqPitch + 4, x
+	lda var_ch_SeqPitch + WAVE_CHANS, x
 	beq @SkipPitchUpdate
 	sta var_Temp_Pointer + 1
 	lda var_ch_SeqPitch, x
@@ -53,8 +57,8 @@ ft_update_channel:
 	; Check this
 	clc
 	lda var_sequence_result
-	adc var_ch_Frequency, x
-	sta var_ch_Frequency, x
+	adc var_ch_TimerPeriod, x
+	sta var_ch_TimerPeriod, x
 	lda var_sequence_result
 	bpl @NoNegativePitch 
 	lda #$FF
@@ -62,8 +66,8 @@ ft_update_channel:
 @NoNegativePitch:
 	lda #$00
 @LoadLowPitch:
-	adc var_ch_Frequency + 4, x
-	sta var_ch_Frequency + 4, x
+	adc var_ch_TimerPeriod + WAVE_CHANS, x
+	sta var_ch_TimerPeriod + WAVE_CHANS, x
 	jsr ft_limit_freq
 	; ^^^^^^^^^^
 
@@ -71,7 +75,7 @@ ft_update_channel:
 @SkipPitchUpdate:
 	; HiPitch bend
 	;
-	lda var_ch_SeqHiPitch + 4, x
+	lda var_ch_SeqHiPitch + WAVE_CHANS, x
 	beq @SkipHiPitchUpdate
 	sta var_Temp_Pointer + 1
 	lda var_ch_SeqHiPitch, x
@@ -104,18 +108,18 @@ ft_update_channel:
 	
 	clc	
 	lda var_Temp16
-	adc var_ch_Frequency, x
-	sta var_ch_Frequency, x
+	adc var_ch_TimerPeriod, x
+	sta var_ch_TimerPeriod, x
 	lda var_Temp16 + 1
-	adc var_ch_Frequency + 4, x
-	sta var_ch_Frequency + 4, x
+	adc var_ch_TimerPeriod + WAVE_CHANS, x
+	sta var_ch_TimerPeriod + WAVE_CHANS, x
 	jsr ft_limit_freq	
 	; ^^^^^^^^^^
 
 @SkipHiPitchUpdate:
 	; Duty cycle/noise mode
 	;
-	lda var_ch_SeqDutyCycle + 4, x
+	lda var_ch_SeqDutyCycle + WAVE_CHANS, x
 	beq @SkipDutyUpdate
 	sta var_Temp_Pointer + 1
 	lda var_ch_SeqDutyCycle, x
@@ -162,7 +166,7 @@ ft_run_sequence:
 ; Reset instrument sequences
 ;	
 ft_reset_instrument:
-	cpx #$04
+	cpx #DPCM_CHANNEL
 	beq @Return						; Skip when DPCM
 	lda #$00
 	sta var_ch_SequencePtr1, x
@@ -206,10 +210,10 @@ ft_load_instrument:
 	ldy #$00
 	; Load the address for selected instrument
 	clc
-	adc var_instrument_list
+	adc var_Instrument_list
 	sta var_Temp_Pointer
 	tya
-	adc var_instrument_list + 1
+	adc var_Instrument_list + 1
 	sta var_Temp_Pointer + 1
 	clc
 	ldy #$00
@@ -242,31 +246,31 @@ ft_load_instrument:
 	lda var_Temp16
 	sta var_ch_SeqVolume, x
 	lda var_Temp16 + 1
-	sta var_ch_SeqVolume + 4, x
+	sta var_ch_SeqVolume + WAVE_CHANS, x
 
 	jsr ft_get_sequence_address		; Arpeggio
 	lda var_Temp16
 	sta var_ch_SeqArpeggio, x
 	lda var_Temp16 + 1
-	sta var_ch_SeqArpeggio + 4, x
+	sta var_ch_SeqArpeggio + WAVE_CHANS, x
 		
 	jsr ft_get_sequence_address		; Pitch
 	lda var_Temp16
 	sta var_ch_SeqPitch, x
 	lda var_Temp16 + 1
-	sta var_ch_SeqPitch + 4, x
+	sta var_ch_SeqPitch + WAVE_CHANS, x
 	
 	jsr ft_get_sequence_address		; Hi-pitch
 	lda var_Temp16
 	sta var_ch_SeqHiPitch, x
 	lda var_Temp16 + 1
-	sta var_ch_SeqHiPitch + 4, x
+	sta var_ch_SeqHiPitch + WAVE_CHANS, x
 	
 	jsr ft_get_sequence_address		; Duty cycle
 	lda var_Temp16
 	sta var_ch_SeqDutyCycle, x
 	lda var_Temp16 + 1
-	sta var_ch_SeqDutyCycle + 4, x
+	sta var_ch_SeqDutyCycle + WAVE_CHANS, x
 	
 	; Reset positions
 	jsr ft_reset_instrument
@@ -275,18 +279,18 @@ ft_load_instrument:
 
 ; Make sure the frequency doesn't exceed max or min
 ft_limit_freq:
-	lda var_ch_Frequency + 4, x
+	lda var_ch_TimerPeriod + WAVE_CHANS, x
 	bmi @LimitMin						; min
 	cmp #$08							; max
 	bmi @NoLimit
 	lda #$07
-	sta var_ch_Frequency + 4, x
+	sta var_ch_TimerPeriod + WAVE_CHANS, x
 	lda #$FF
-	sta var_ch_Frequency, x
+	sta var_ch_TimerPeriod, x
 @NoLimit:
 	rts
 @LimitMin:
 	lda #$00
-	sta var_ch_Frequency, x
-	sta var_ch_Frequency + 4, x
+	sta var_ch_TimerPeriod, x
+	sta var_ch_TimerPeriod + WAVE_CHANS, x
 	rts

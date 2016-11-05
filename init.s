@@ -7,7 +7,7 @@
 ;
 ft_music_init:
 	asl a
-	pha							; Save song number
+	pha			; Save song number
 	; Clear music variables to zero
 	; Remember this will fail if number of bytes exceeds 256
 	lda #$00
@@ -17,7 +17,7 @@ ft_music_init:
 	sta var_Song_list, y		; <- has to be the first variable in RAM
 	dey
 	bne @ClearLoop
-	pla							; Restore song number
+	pla			; Restore song number
 	jsr ft_load_song
 	; Kill APU registers
 	lda #$00
@@ -31,12 +31,17 @@ ft_music_init:
 	sta $400D, x
 	dex
 	bne @LoadRegs2
-	lda #$30					; noise is special
+	lda #$30		; noise is special
 	sta $400C	
 	lda #$0F
-	sta $4015					; APU control
+	sta $4015		; APU control
+	lda #$08
+	sta $4001
+	sta $4005
+	lda #$C0
+	sta $4017
 	lda #$40
-	sta $4017					; Disable frame IRQs	
+	sta $4017		; Disable frame IRQs	
 	rts
 
 ;
@@ -83,7 +88,7 @@ ft_load_song:
 	lda #<ft_notes_ntsc
 	sta var_Note_Table
 	lda #>ft_notes_ntsc
-	sta var_Note_Table + 1	
+	sta var_Note_Table + 1
 	jmp @LoadDone	
  @LoadPAL:
 	; Load PAL speed divider and frequency table
@@ -110,22 +115,30 @@ ft_load_song:
 	ldx #$01
 	stx var_Flags
 	dex
-	lda #$80
 @ClearChannels2:					; This clears the first four channels
+	lda #$7F
+	sta var_ch_VolColumn, x
+	lda #$80
 	sta var_ch_FinePitch, x
 	inx
 	cpx #(CHANNELS - 1)
 	bne @ClearChannels2
-		
-	ldx #$FF						
+	
+	ldx #$FF
 	stx var_ch_PrevFreqHigh			; Set prev freq to FF for Sq1 & 2
 	stx var_ch_PrevFreqHigh + 1
 	
 	inx								; Jump to the first frame
 	stx var_Current_Frame
 	jsr ft_load_frame
-			
+	
 	jsr ft_calculate_speed
+	;jsr ft_restore_speed
+	
+	lda #$00
+	sta var_Tempo_Accum
+	sta var_Tempo_Accum + 1
+	
 	rts
 
 ;
@@ -174,15 +187,23 @@ ft_load_track:
 	sta var_Frame_Count, x
 	iny
 	inx
-	cpx #$05
+	cpx #$06
 	bne @ReadLoop
 
 	rts
 
 ;
-; Load the frame in A for all channel
+; Load the frame in A for all channels
 ;
 ft_load_frame:
+
+	pha
+	lda var_InitialBank
+	beq @SkipBankSwitch
+	sta $5FFB
+@SkipBankSwitch:
+	pla
+
 	; Get the entry in the frame list
 	asl A					; Multiply by two
 	clc						; And add the frame list addr to get 
@@ -212,7 +233,7 @@ ft_load_frame:
 	iny
 	lda (var_Temp_Pointer), y			; Pattern address, high byte
 	adc ft_music_addr + 1
-	sta var_ch_Pattern_addr + 5, x
+	sta var_ch_Pattern_addr + CHANNELS, x
 	iny
 	lda (var_Temp_Pointer), y			; Pattern bank number 
 	sta var_ch_Bank, x
@@ -231,7 +252,7 @@ ft_load_frame:
 @FirstRow:
 	rts
 	
-; Step down some rows, this is NOT recommended in songs when CPU time is critical
+; Skip to a certain row, this is NOT recommended in songs when CPU time is critical!!
 ;
 ft_SkipToRow:
 	pha									; Save row count
@@ -246,11 +267,10 @@ ft_SkipToRow:
 	sta var_ch_NoteDelay, x
 		
 @RowLoop:
-
 	ldy #$00
 	lda var_ch_Pattern_addr, x
 	sta var_Temp_Pointer
-	lda var_ch_Pattern_addr + 5, x
+	lda var_ch_Pattern_addr + CHANNELS, x
 	sta var_Temp_Pointer + 1
 
 @ReadNote:
@@ -287,7 +307,7 @@ ft_SkipToRow:
 	sta var_ch_Pattern_addr, x
 	lda #$00
 	adc var_Temp_Pointer + 1
-	sta var_ch_Pattern_addr + 5, x
+	sta var_ch_Pattern_addr + CHANNELS, x
 	
 	dec var_Temp2						; Next row
 	bne @RowLoop
