@@ -1,6 +1,6 @@
 ;
 ; The NSF music driver for FamiTracker
-; Version 2.7
+; Version 2.8
 ; By jsr (zxy965r@tninet.se)
 ; assemble with ca65
 ;
@@ -448,6 +448,9 @@ ft_channel_mask:
 .endif
 .ifdef USE_N163
 	.include "n163.s"
+.endif
+.ifdef USE_S5B
+    .include "s5b.s"
 .endif
 
 ;

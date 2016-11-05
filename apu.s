@@ -61,10 +61,9 @@ ft_update_apu:
 	and #$01
 	bne :+
 	jmp @Square2
-:
-	lda var_ch_Note				; Kill channel if note = off
+:	lda var_ch_Note				; Kill channel if note = off
 	beq @KillSquare1
-	
+
 	; Calculate volume
 .if 0
 	ldx #$00
@@ -73,10 +72,9 @@ ft_update_apu:
 .endif
 	; Calculate volume
 	lda var_ch_VolColumn + 0		; Kill channel if volume column = 0
-
 	asl a
-	and #$F0
 	beq @KillSquare1
+	and #$F0
 	sta var_Temp
 	lda var_ch_Volume + 0
 	beq @KillSquare1
@@ -87,6 +85,10 @@ ft_update_apu:
     sbc var_ch_TremoloResult
     bpl :+
     lda #$00
+:   bne :+
+    lda var_ch_VolColumn + 0
+    beq :+
+    lda #$01
 :
 
 	; Write to registers
@@ -156,33 +158,23 @@ ft_update_apu:
 	and #$02
 	bne :+
 	jmp @Triangle
-:
-	lda var_ch_Note + 1
-;	beq @KillSquare2
-	bne :+
-	jmp @KillSquare2
-:
+:	lda var_ch_Note + 1
+	beq @KillSquare2
 
-	.if 1
 	; Calculate volume
-	lda var_ch_VolColumn + 1		; Kill channel if volume column = 0
+.if 0
+	ldx #$01
+	jsr ft_get_volume
+	beq @KillSquare2
+.endif
 
+	lda var_ch_VolColumn + 1		; Kill channel if volume column = 0
 	asl a
 	and #$F0
-;	beq @KillSquare2
-
-	bne :+
-    jmp @KillSquare2
-    :
-
+    beq @KillSquare2
 	sta var_Temp
 	lda var_ch_Volume + 1
-;	beq @KillSquare2
-
-    bne :+
-    jmp @KillSquare2
-    :
-
+	beq @KillSquare2
 	ora var_Temp
 	tax
 	lda ft_volume_table, x
@@ -190,14 +182,11 @@ ft_update_apu:
     sbc var_ch_TremoloResult + 1
     bpl :+
     lda #$00
+:   bne :+
+    lda var_ch_VolColumn + 1
+    beq :+
+    lda #$01
 :
-	.endif
-
-	.if 0
-	ldx #$01
-	jsr ft_get_volume
-	beq @KillSquare2
-	.endif
 
 	; Write to registers
 	pha
@@ -237,6 +226,12 @@ ft_update_apu:
 	sta var_ch_PrevFreqHigh + 1
 
 	jmp @Triangle
+
+@KillSquare2:
+	lda #$30
+	sta $4004
+	jmp @Triangle
+
 @NoSquare2Sweep:				; No Sweep
 	lda #$08
 	sta $4005
@@ -249,10 +244,6 @@ ft_update_apu:
 	sta $4007
 	sta var_ch_PrevFreqHigh + 1
 @SkipHighPartSq2:
-	jmp @Triangle
-@KillSquare2:
-	lda #$30
-	sta $4004
 
 @Triangle:
 	lda var_Channels
@@ -296,16 +287,16 @@ ft_update_apu:
 	lda var_Channels
 	and #$08
 	beq @DPCM
-		
+
 	lda var_ch_Note + 3
 	beq @KillNoise
+
 	; Calculate volume
-	.if 1
 	lda var_ch_VolColumn + 3		; Kill channel if volume column = 0
 	asl a
+	beq @KillNoise
 	and #$F0
 	sta var_Temp
-	beq @KillNoise
 	lda var_ch_Volume + 3
 	beq @KillNoise
 	ora var_Temp
@@ -315,11 +306,11 @@ ft_update_apu:
     sbc var_ch_TremoloResult + 3
     bpl :+
     lda #$00
+:   bne :+
+    lda var_ch_VolColumn + 3
+    beq :+
+    lda #$01
 :
-	.endif
-;	ldx #$03
-;	jsr ft_get_volume
-;	beq @KillNoise
 
 	; Write to registers
 	ora #$30

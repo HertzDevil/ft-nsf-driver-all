@@ -27,7 +27,7 @@ ft_run_effects:
 	adc var_Temp
 	bpl :+
 	lda #$7F
-:	sta var_ch_VolColumn, x
+:   sta var_ch_VolColumn, x
 @NoVolSlide:
 
 .if 0
