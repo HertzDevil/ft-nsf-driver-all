@@ -1,10 +1,19 @@
 ;
 ; The NSF music driver for FamiTracker
-; Version 1.7
+; Version 1.8
 ; By jsr (zxy965r@tninet.se)
 ; assemble with cc65
 ;
 ; Recent changes
+;  -- 1.8 -------------------------------------------------------------------------------------------
+;   - The PPU was not turned off in the portion of code that are used for playback on a NES.
+;   - DPCM loop
+;   - Exx volume command
+;   - Triangle pop on real hardware is fixed
+;   - Bankswitching is added
+;   - Portamento behaviour changed
+;	- DPCM DAC control effect
+;	- Delay effect
 ;  -- 1.7 -------------------------------------------------------------------------------------------
 ;   - Music data is compressed
 ;   - Fixed noise note-off problem
@@ -28,35 +37,34 @@
 ; This code is not very optimized, average CPU usage is around 10%
 ;
 ; Todo:
-;  Clean up (after 1.5 release)
-;  Optimize!
+;
+;   This file will be rewritten completely for next version. (That's the plan)
 ;
 
-.define VERSION         "FT-NSF-drv v1.7"
+.define VERSION         "FT-NSF-drv v1.8"
 
 ; Source switches
 ;
-SRC_MAKE_NSF			= 0			; 1 = create NSF, 0 = produce raw code
-SRC_MAKE_NES			= 0
+SRC_MAKE_NSF		= 0			; 1 = create NSF, 0 = produce raw code
+SRC_MAKE_NES		= 0
+
+DRIVER				= 1			; Do not change
 
 ; End of header
 ;
 ; Driver constants
 ;
-SONG_OFFSET 			= $8E00		; where the music will be
+SONG_OFFSET 		= $8E40		; where the music will be
 
-SONG_SPEED				= SONG_OFFSET			; 8
-SONG_TEMPO				= SONG_OFFSET + 1		; 8
-SONG_FRAME_CNT			= SONG_OFFSET + 2		; 8
-SONG_PAT_LENGTH			= SONG_OFFSET + 3		; 8
-SONG_INST_PTR			= SONG_OFFSET + 4		; 16
-SONG_INST_DPCM_PTR		= SONG_OFFSET + 6		; 16
-SONG_SEQ_PTR			= SONG_OFFSET + 8		; 16
-SONG_FRAME_PTR			= SONG_OFFSET + 10		; 16
-SONG_DPCM_PTR			= SONG_OFFSET + 12		; 16
-SONG_SPEED_DIV			= SONG_OFFSET + 14		; 16
+SONG_TEMPO			= SONG_OFFSET + 0		; 8
+SONG_INST_PTR		= SONG_OFFSET + 1		; 16
+SONG_INST_DPCM_PTR	= SONG_OFFSET + 3		; 16
+SONG_SEQ_PTR		= SONG_OFFSET + 5		; 16
+SONG_DPCM_PTR		= SONG_OFFSET + 7		; 16
+SONG_SONG_PTR		= SONG_OFFSET + 9		; 16
+SONG_SPEED_DIV		= SONG_OFFSET + 11		; 32
 
-SEQ_CHANNELS			= 5	; 4 channels are using the sequence-system (not really working right now)
+SEQ_CHANNELS		= 5	; 4 channels is using the sequence-system
 
 ; Macros
 ;
@@ -87,12 +95,14 @@ mdv_pointer:			.res 2
 mdv_inst_ptr:			.res 2
 mdv_inst_dpcm_ptr:		.res 2
 mdv_seq_ptr:			.res 2
-mdv_frame_ptr:			.res 2
 mdv_dpcm_ptr:			.res 2
+mdv_song_ptr:			.res 2
+mdv_frame_ptr:			.res 2
 mdv_temp_ptr:			.res 2
 mdv_note_lookup:		.res 2
 mdv_mod_ptr:			.res 2
 mdv_dpcm_inst:			.res 2		; pointer to the selected DPCM instrument
+mdv_speed_div_ptr:		.res 2
 ACC:					.res 2
 AUX:					.res 2
 EXT:					.res 2
@@ -102,7 +112,8 @@ EXT:					.res 2
 
 ; Player variables, not zero-page
 ;
-mdv_playing:			.res 1		; :1 is playing, :2 = PAL 
+mdv_loop_times:			.res 1
+mdv_playing:			.res 1		; 1 is playing, 2 = PAL
 mdv_temp:				.res 1
 mdv_pattern_length:		.res 1
 mdv_instrument:			.res 1
@@ -117,18 +128,22 @@ mdv_seek_to:			.res 1
 mdv_nsf_frame:			.res 1
 mdv_volume:				.res 1
 mdv_sweep:				.res 1
-mdv_tempo_accum:		.res 2
 mdv_speed:				.res 1
-mdv_tempo:				.res 2
+mdv_tempo:				.res 1
+mdv_tempo_accum:		.res 2
 mdv_speed_count:		.res 2
 mdv_temp_index:			.res SEQ_CHANNELS
+mdv_song:				.res 1
 
 ; Channel variables
 ;
 chan_dpcm_pitch:		.res 1
 chan_dpcm_addr:			.res 1
 chan_dpcm_length:		.res 1
+chan_dpcm_dac:			.res 1
 
+chan_banks:				.res 5
+chan_bank_pos:			.res 5
 chan_pattern_ptr:		.res 10
 chan_pattern_pos:		.res 5
 chan_rle:				.res 5
@@ -152,6 +167,7 @@ chan_tremolo_pos:		.res 5
 chan_tremolo_param:		.res 5
 chan_finepitch:			.res 4
 chan_sweep:				.res 2		; only avaliable on the square channels
+chan_delay:				.res 5
 chan_modptr1:			.res SEQ_CHANNELS * 2		; volume
 chan_modptr2:			.res SEQ_CHANNELS * 2		; arpeggio
 chan_modptr3:			.res SEQ_CHANNELS * 2		; pitch
@@ -169,9 +185,13 @@ chan_modindex:			.res SEQ_CHANNELS * 5
 .if SRC_MAKE_NSF = 1
 	.segment "HEADER"
 	.incbin "header.bin"
+	.out "File configured to create NSF"
 .elseif SRC_MAKE_NES = 1
-	.segment "NESHEADER"
-	.incbin "nesheader.bin"
+;	.segment "NESHEADER"
+;	.incbin "nesheader.bin"
+	.out "File configured to create NES"
+.else
+	.out "File configured to create raw code"
 .endif
 
 	.segment "CODE"
@@ -184,10 +204,12 @@ PLAY:
 ;
 ; Player init code
 ;
-;  a = song number (currently thrown away, multisong tunes will come)
+;  a = song number
 ;  x = ntsc/pal
 ;
 sound_init:								; NSF init
+	asl a
+	sta mdv_song
 	lda #$06
 	sta mdv_speed
 	lda SONG_TEMPO
@@ -198,6 +220,10 @@ sound_init:								; NSF init
 	sta mdv_note_lookup
 	lda #>md_notes_ntsc
 	sta mdv_note_lookup	+ 1
+	lda SONG_SPEED_DIV
+	sta mdv_speed_div_ptr
+	lda SONG_SPEED_DIV + 1
+	sta mdv_speed_div_ptr + 1
 	jmp md_machine_loaded
 md_load_pal:
 	lda mdv_playing
@@ -207,15 +233,11 @@ md_load_pal:
 	sta mdv_note_lookup
 	lda #>md_notes_pal
 	sta mdv_note_lookup	+ 1
+	lda SONG_SPEED_DIV + 2
+	sta mdv_speed_div_ptr
+	lda SONG_SPEED_DIV + 3
+	sta mdv_speed_div_ptr + 1
 md_machine_loaded:
-	lda SONG_SPEED						; speed
-	cmp #$20
-	bcc md_init_was_speed
-	sta mdv_tempo
-	jmp md_init_after_speed
-md_init_was_speed:
-	sta mdv_speed
-md_init_after_speed:
 	lda SONG_INST_PTR
 	sta mdv_inst_ptr
 	lda SONG_INST_PTR + 1
@@ -228,14 +250,51 @@ md_init_after_speed:
 	sta mdv_seq_ptr
 	lda SONG_SEQ_PTR + 1
 	sta mdv_seq_ptr + 1
-	lda SONG_FRAME_PTR
-	sta mdv_frame_ptr
-	lda SONG_FRAME_PTR + 1
-	sta mdv_frame_ptr + 1
 	lda SONG_DPCM_PTR
 	sta mdv_dpcm_ptr
 	lda SONG_DPCM_PTR + 1
 	sta mdv_dpcm_ptr + 1
+	lda SONG_SONG_PTR
+	sta mdv_song_ptr
+	lda SONG_SONG_PTR + 1
+	sta mdv_song_ptr + 1
+	
+	; calculate correct frame
+	ldy mdv_song
+		
+	lda (mdv_song_ptr), y
+	sta mdv_temp_ptr
+	iny
+	lda (mdv_song_ptr), y
+	sta mdv_temp_ptr + 1
+
+	; Get frames and music params
+	ldy #$00
+	lda (mdv_temp_ptr), y
+	sta mdv_frame_count
+	iny
+	lda (mdv_temp_ptr), y
+	sta mdv_pattern_length
+	sta mdv_patternpos
+	iny
+
+	lda (mdv_temp_ptr), y					; speed
+	cmp #$20
+	bcc md_init_was_speed
+	sta mdv_tempo
+	jmp md_init_after_speed
+md_init_was_speed:
+	sta mdv_speed
+md_init_after_speed:
+	
+	clc
+	lda mdv_temp_ptr
+	adc #$03
+	sta mdv_frame_ptr
+	lda mdv_temp_ptr + 1
+	adc #$00
+	sta mdv_frame_ptr + 1
+		
 	lda #$00
 	sta mdv_frame
 	sta chan_sweep
@@ -245,11 +304,8 @@ md_init_after_speed:
 	ora mdv_playing
 	sta mdv_playing
 	jsr md_load_frame
-	lda SONG_PAT_LENGTH
-	sta mdv_pattern_length
+	lda mdv_pattern_length
 	sta mdv_patternpos
-	lda SONG_FRAME_CNT
-	sta mdv_frame_count
 	ldx #$FF
 md_reset_chan:
 	inx
@@ -260,10 +316,13 @@ md_reset_chan:
 	sta chan_portato_lo, x
 	sta chan_freq_hi, x
 	sta chan_freq_lo, x
+	sta chan_delay, x
 	lda #$FF
 	sta chan_prevfreq_hi, x
 	lda #$80
 	sta chan_finepitch, x
+	lda #$0F
+	sta chan_volume, x
 	cpx #$03
 	bne md_reset_chan
 	lda #$00
@@ -296,16 +355,19 @@ md_reset_chan:
 	sta $4013
 	lda #$30		; noise is special
 	sta $400C
-	lda SONG_SPEED_DIV
-	sta mdv_tempo_accum
-	lda SONG_SPEED_DIV + 1
-	sta mdv_tempo_accum + 1
+
+;	lda SONG_SPEED_DIV
+;	sta mdv_tempo_accum
+;	lda SONG_SPEED_DIV + 1
+;	sta mdv_tempo_accum + 1
+	
 	jsr md_calc_speed
 	rts
 
 md_calc_speed:
 	; multiply with 24
 	lda mdv_tempo
+;	sta $1300
 	sta ACC
 	lda #$18
 	sta AUX
@@ -315,6 +377,7 @@ md_calc_speed:
 	jsr MULT	; ACC*AUX -> [ACC,EXT] (low,hi) 32 bit result	
 	; divide by speed
 	lda mdv_speed
+;	sta $1300
 	sta AUX
 	lda #$00
 	sta AUX + 1
@@ -324,6 +387,7 @@ md_calc_speed:
 	lda ACC + 1
 	sta mdv_speed_count + 1
 	rts
+	
 ;
 ; Start of player code
 ;
@@ -351,25 +415,56 @@ md_loop_channels:						; update all channels
 	bne md_chan_not_done
 	jmp md_end
 md_chan_not_done:
-	
+
+	lda #$00
+	sta mdv_loop_times
+
+	lda chan_delay, x
+	beq md_delay_wait					; skip if delay counter is zero
+	dec chan_delay, x
+	lda chan_delay, x
+	bne md_delay_wait
+	inc mdv_loop_times
+md_delay_wait:
+
+	; Note fetch check
 	lda mdv_tempo_accum					; check if equal
 	ora mdv_tempo_accum + 1
-	beq md_process_channel
+	beq md_trigger_channel
+	;beq md_process_channel
 	lda mdv_tempo_accum + 1				; check if negative
 	and #$80
+	beq md_no_trigger_channel
+md_trigger_channel:
+	inc mdv_loop_times
+md_no_trigger_channel:
+	
+	lda mdv_loop_times
 	bne md_process_channel
 	
 	jsr md_process_instrument
 	jmp md_loop_channels
-md_process_channel:		
+md_process_channel:
+	lda chan_delay, x					; see if a delayed note was left over
+	beq md_no_extra_note
+	inc mdv_loop_times
+md_no_extra_note:
+	lda #$00
+	sta chan_delay, x
+	sta mdv_sweep
 	lda chan_pattern_ptr, x				; pattern read pointer
 	sta mdv_pointer
 	lda chan_pattern_ptr + 5, x
 	sta mdv_pointer + 1
+;;;;;;;;;;;;;;;;; Get the correct bank --- this is for bankswitching!
+	lda chan_bank_pos, x
+	tay
+	lda chan_banks, x
+	sta $5FF8, y
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	lda #$0F
 	sta mdv_volume
 	ldy #$00
-	sty mdv_sweep
 md_get_pattern_data:
 	lda chan_rle, x
 	beq @1
@@ -383,24 +478,26 @@ md_get_pattern_data:
 	lda mdv_temp
 	bmi md_note_effect					; was an effect/command		
 	beq md_no_note						; no new note
-		cmp #$7F						; note halt
-		beq md_note_halt
-			iny
-			sta chan_note, x					; save note/octave
-			sta chan_orig_note, x
-			jsr md_trigger_note
-			jsr md_inst_seq_reload_all
-			lda #$0F
-			sta chan_volume, x
-			jmp md_note_end
+	cmp #$7F							; note halt
+	beq md_note_halt
+		iny								; new note
+		sta chan_note, x					; save note/octave
+		sta chan_orig_note, x
+		jsr md_trigger_note
+		jsr md_inst_seq_reload_all
+		;lda #$0F
+		lda mdv_volume
+		sta chan_volume, x
+		jmp md_note_end
 	md_note_halt:
 		iny
 		lda #$00
+		sta chan_volume, x
 		sta chan_note, x
 		sta chan_portato_hi, x
 		sta chan_portato_lo, x
-		sta chan_freq_hi, x
-		sta chan_freq_lo, x
+		lda #$FF
+		sta chan_prevfreq_hi, x
 		jmp md_note_end
 	md_rle:
 		iny
@@ -436,12 +533,14 @@ md_effects:
 	.word md_effect_vibrato, 	md_effect_tremolo
 	.word md_effect_speed, 		md_effect_jump, 	md_effect_skip
 	.word md_effect_halt, 		md_effect_volume,	md_effect_sweep
-	.word md_effect_pitch
+	.word md_effect_pitch,		md_effect_delay,	md_effect_dac
 
 md_instchange:
 	jsr md_fetch_pattern_data
 	sta chan_inst, x
 	jsr md_reload_instrument			; load specific sequences
+	lda mdv_volume
+	sta chan_volume, x
 	jmp md_get_pattern_data				; see if a note is next
 md_volchange:
 	jsr md_fetch_pattern_data
@@ -475,8 +574,10 @@ md_effect_tremolo:
 	jmp md_get_pattern_data
 md_effect_speed:
 	jsr md_fetch_pattern_data
-	cmp #$20
+	pha
+	cmp #21
 	bcc @1
+	pla
 	sta mdv_tempo
 	tya
 	pha
@@ -485,6 +586,7 @@ md_effect_speed:
 	tay
 	jmp md_get_pattern_data
 @1:
+	pla
 	sta mdv_speed
 	tya
 	pha
@@ -506,8 +608,8 @@ md_effect_halt:
 	jmp md_halt
 md_effect_volume:
 	jsr md_fetch_pattern_data
+	sta mdv_volume				; if instrument is switched
 	sta chan_volume, x
-	sta mdv_volume
 	jmp md_get_pattern_data
 md_effect_portaon:
 	jsr md_fetch_pattern_data
@@ -528,11 +630,24 @@ md_effect_pitch:
 	jsr md_fetch_pattern_data
 	sta chan_finepitch, x
 	jmp md_get_pattern_data
+md_effect_delay:
+	jsr md_fetch_pattern_data
+	sta chan_delay, x
+	jmp md_note_end	; skip the rest
+md_effect_dac:
+	jsr md_fetch_pattern_data
+	sta chan_dpcm_dac
+	jmp md_get_pattern_data
 md_note_end:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	lda #$01
+	sta $5FF9
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	lda mdv_sweep
 	beq md_no_sweep
 	sta chan_sweep, x
 	lda #$00
+	sta chan_prevfreq_hi, x
 	sta mdv_sweep
 md_no_sweep:
 	clc									; store current pattern pos pointer
@@ -542,6 +657,16 @@ md_no_sweep:
 	lda #$00
 	adc mdv_pointer + 1
 	sta chan_pattern_ptr + 5, x	
+	
+	; see if a delayed note was passed
+	lda mdv_loop_times
+	beq md_note_skip
+	dec mdv_loop_times
+	lda mdv_loop_times
+	beq md_note_skip
+	jmp md_process_channel
+md_note_skip:
+	
 	jsr md_process_instrument
 	jmp md_loop_channels
 md_end:									; end of pattern processing
@@ -604,10 +729,10 @@ md_halt:
 md_reload_speed:
 	clc
 	lda mdv_tempo_accum
-	adc SONG_SPEED_DIV
+	adc mdv_speed_div_ptr ;SONG_SPEED_DIV
 	sta mdv_tempo_accum
 	lda mdv_tempo_accum + 1
-	adc SONG_SPEED_DIV + 1
+	adc mdv_speed_div_ptr + 1 ;SONG_SPEED_DIV + 1
 	sta mdv_tempo_accum + 1
 	rts
 md_select_next_frame:					; move to next frame
@@ -622,6 +747,9 @@ md_select_next_frame:					; move to next frame
 	md_no_reset_song:
 	jsr md_load_frame
 	rts
+	;
+	; This below is failing hard (not anymore perhaps)
+	;
 md_seek_to_pattern:
 	jsr md_select_next_frame
 	lda mdv_seek_to
@@ -632,45 +760,63 @@ md_seek_to_pattern:
 md_seek_loop_chan:
 	lda mdv_seek_to
 	sta mdv_temp
-md_seek_loop:
+;md_seek_loop:
+	; Load up pointer
 	lda chan_pattern_ptr, x				; pattern read pointer
 	sta mdv_pointer
 	lda chan_pattern_ptr + 5, x
 	sta mdv_pointer + 1
-	jsr md_increase_pat
 	ldy #$00
-	;lda (mdv_pointer), y
-	lda chan_rle, x
-	beq @1
-	dec chan_rle, x
-	lda #$00
-	jmp @2
-@1:
-	lda (mdv_pointer), y
-;	jsr md_fetch_pattern_data
-@2:
-	bpl md_seek_no_cmd
-	cmp #$80
-	bne md_seek_no_inst
-	iny
+md_seek_loop:
+	; First byte
 	;lda (mdv_pointer), y
 	jsr md_fetch_pattern_data
-	sta chan_inst, x
-md_seek_no_inst:
-	jsr md_increase_pat
-	jmp md_seek_loop
+	pha
+	cmp #$FF				; Check if RLE
+	bne @1
+	; Store a RLE value
+	jsr md_fetch_pattern_data
+	sta chan_rle, x
+@1:	; check rle
+	lda chan_rle, x
+	beq @2
+	dec chan_rle, x
+	lda #$00
+	pla
+	jmp md_seek_no_cmd
+@2:	; no rle
+	pla
+	bmi md_seek_command
+	; Note
+	jmp md_seek_no_cmd
+md_seek_command:
+	; Command (inst/volume/effect)
+	jsr md_fetch_pattern_data
+	jmp md_seek_loop					; continue to actual note
 md_seek_no_cmd:
+	; Go to next row
 	dec mdv_temp
 	lda mdv_temp
 	bne md_seek_loop
+	; Store position
+	clc
+	tya
+	adc chan_pattern_ptr, x
+	sta chan_pattern_ptr, x
+	lda #$00
+	adc chan_pattern_ptr + 5, x
+	sta chan_pattern_ptr + 5, x
+	; Advance to next channel
 	inx
 	cpx #$05
 	bne md_seek_loop_chan
-	lda mdv_patternpos
+	; All channels done
 	sec
+	lda mdv_patternpos		; update pattern row pos
 	sbc mdv_seek_to
 	sta mdv_patternpos
-	rts
+	rts						; seeking is done
+	
 md_increase_pat:
 	clc
 	lda chan_pattern_ptr, x
@@ -694,8 +840,8 @@ md_no_dmc:
 	sta chan_modindex + 15, x
 	sta chan_modindex + 20, x
 	jsr md_load_instrument
-	lda mdv_volume
-	sta chan_volume, x
+	;lda mdv_volume
+	;sta chan_volume, x
 	lda #$00
 	sta chan_dutycycle, x
 	pla
@@ -910,8 +1056,11 @@ md_trem_more_dec:
 	lda chan_volume, x
 	sbc mdv_temp
 	sta mdv_temp
+md_trem_rts:
 	rts
 md_apply_vibrato:
+;	lda chan_note, x
+;	beq md_trem_rts
 	ldy chan_vibrato_pos, x
 	lda md_lfo, y
 	pha
@@ -1051,12 +1200,15 @@ md_update_square1_hack_set:
 md_update_channels:
 	; Square 1
 	ldx #$00
+	lda chan_note
+	beq md_upd_ch1_silence
 	jsr md_apply_vibrato
 	jsr md_apply_tremolo
 	sec
 	lda mdv_temp
 	sbc chan_damp_vol	
 	bpl md_upd_ch1_novres
+md_upd_ch1_silence:
 	lda #$00
 md_upd_ch1_novres:
 	sta mdv_temp
@@ -1076,10 +1228,6 @@ md_upd_ch1_novres:
 	and #$80
 	beq md_ch1_dont_update_low
 	
-	lda #$08					; Turn off sweep
-	sta $4001
-	jsr md_kill_sweep
-	
 	lda chan_sweep
 	sta $4001
 	and #$7F
@@ -1088,8 +1236,8 @@ md_upd_ch1_novres:
 	sta $4002
 	lda mdv_temp_ptr + 1
 	sta $4003
-	lda #$FF
-	sta chan_prevfreq_hi
+;	lda #$FF
+;	sta chan_prevfreq_hi
 	jsr md_kill_sweep
 	jmp md_ch1_dont_update_low
 
@@ -1108,12 +1256,15 @@ md_no_sweep_update1:
 md_ch1_dont_update_low:
 	; Square 2
 	ldx #$01
+	lda chan_note + 1
+	beq md_upd_ch2_silence
 	jsr md_apply_vibrato
 	jsr md_apply_tremolo
 	sec
 	lda mdv_temp
 	sbc chan_damp_vol + 1
 	bpl md_upd_ch2_novres
+md_upd_ch2_silence:
 	lda #$00
 md_upd_ch2_novres:
 	sta mdv_temp
@@ -1160,6 +1311,9 @@ md_ch2_dont_update_low:
 	jsr md_apply_vibrato
 	lda chan_volume + 2
 	beq md_ch3_silent
+	lda $4015							; first enable it
+	ora #$04
+	sta $4015	
 	lda #%11000000						; update triangle
 	sta $4008
 	lda #$00
@@ -1170,11 +1324,14 @@ md_ch2_dont_update_low:
 	sta $400B
 	jmp md_ch3_dont_update_low
 md_ch3_silent:
-	lda #$00
-	sta $4008
-	sta $4009
-	sta $400A
-	sta $400B
+;	lda #$00
+;	sta $4008
+;	sta $4009
+;	sta $400A
+;	sta $400B
+	lda $4015		; My previous way to stop triangle wasn't popular...
+	and #$FB
+	sta $4015
 md_ch3_dont_update_low:
 	sta chan_prevfreq_hi + 2
 	; Noise	
@@ -1213,12 +1370,20 @@ md_upd_ch3_novres:
 ;
 ; Update the DMC channel
 ;	
+	lda chan_dpcm_dac
+	cmp #$FF
+	beq md_ch5_no_dac
+	lda chan_dpcm_dac
+	sta $4011
+	lda #$FF
+	sta chan_dpcm_dac
+	sta chan_note + 4
+md_ch5_no_dac:
 	lda chan_note + 4					; if note = 0 (halt), reset the DMC to regain full triangle volume
 	beq md_ch5_reset_dmc
 	lda chan_dpcm_length
 	beq md_ch5_dont_update
 	lda chan_dpcm_pitch
-	and #$0F
 	sta $4010							; DPCM pitch
 	lda chan_dpcm_addr
 	sta $4012							; DPCM address
@@ -1532,6 +1697,7 @@ md_limit_freq:							; make sure the frequency doesn't exceed max or min
 	sta chan_freq_hi, x
 	md_no_limit:
 	rts
+
 md_load_frame:							; load pattern pointers
 	lda mdv_frame
 	asl a
@@ -1541,41 +1707,28 @@ md_load_frame:							; load pattern pointers
 	iny 
 	lda (mdv_frame_ptr), y
 	sta mdv_pointer + 1
-md_load_frame_square1:					; start with square 1
-	ldy #$00
+
+	ldy #$00	
+	ldx #$00
+md_load_frame_loop:
 	lda (mdv_pointer), y
-	sta chan_pattern_ptr
+	sta chan_pattern_ptr, x
 	iny
 	lda (mdv_pointer), y
-	sta chan_pattern_ptr + 5
-md_load_frame_square2:
-	ldy #$02
-	lda (mdv_pointer), y
-	sta chan_pattern_ptr + 1
+	sta chan_pattern_ptr + 5, x
 	iny
 	lda (mdv_pointer), y
-	sta chan_pattern_ptr + 6
-md_load_frame_triangle:
-	ldy #$04
-	lda (mdv_pointer), y
-	sta chan_pattern_ptr + 2
+	sta chan_banks, x
 	iny
 	lda (mdv_pointer), y
-	sta chan_pattern_ptr + 7
-md_load_frame_noise:
-	ldy #$06
-	lda (mdv_pointer), y
-	sta chan_pattern_ptr + 3
+	sta chan_bank_pos, x
 	iny
-	lda (mdv_pointer), y
-	sta chan_pattern_ptr + 8
-md_load_frame_dmc:
-	ldy #$08
-	lda (mdv_pointer), y
-	sta chan_pattern_ptr + 4
-	iny
-	lda (mdv_pointer), y
-	sta chan_pattern_ptr + 9
+	lda #$00
+	sta chan_delay, x
+	inx
+	cpx #$05
+	bne md_load_frame_loop
+	
 	lda #$00
 	sta chan_rle + 0
 	sta chan_rle + 1
@@ -1610,7 +1763,7 @@ md_porta_to_note:
 	beq md_trigger_load					; load frequency if previous note was a halt
 	rts
 
-md_trigger_dpcm:						; Loads a DPCM sample	
+md_trigger_dpcm:						; Load a DPCM sample	
 	tya
 	pha
 	
@@ -1752,72 +1905,7 @@ SongData:
 .endif
 
 .if SRC_MAKE_NES = 1
-;
-; Following code is from Nullsleep's guide since it works well
-;
-RESET:
-	cld			; clear decimal flag
-	sei			; disable interrupts
-	lda #%00000000		; disable vblank interrupts by clearing
-	sta $2000		; the most significant bit of $2000
-WaitV1:	
-	lda $2002		; give the PPU a little time to initialize
-	bpl WaitV1		; by waiting for a vblank
-WaitV2:	
-	lda $2002		; wait for a second vblank to be safe
-	bpl WaitV2		; and now the PPU should be initialized
-	lda #$00				; Clear RAM
-	ldx #$FF
-CLEAR_RAM:
-	sta $0000, x
-	sta $0100, x
-	sta $0200, x
-	sta $0300, x
-	sta $0400, x
-	sta $0500, x
-	sta $0600, x
-	sta $0700, x
-	dex
-	bne CLEAR_RAM	
-; *** CLEAR SOUND REGISTERS ***
-	lda #$00		; clear all the sound registers by setting
-	ldx #$00		; everything to 0 in the Clear_Sound loop
-Clear_Sound:
-	sta $4000,x		; store accumulator at $4000 offset by x
-	inx			; increment x
-	cpx #$0F		; compare x to $0F
-	bne Clear_Sound		; branch back to Clear_Sound if x != $0F
-	lda #$10		; load accumulator with $10
-	sta $4010		; store accumulator in $4010
-	lda #$00		; load accumulator with 0
-	sta $4011		; clear these 3 registers that are 
-	sta $4012		; associated with the delta modulation
-	sta $4013		; channel of the NES
-; *** ENABLE SOUND CHANNELS ***
-	lda #%00001111		; enable all sound channels except
-	sta $4015		; the delta modulation channel
-; *** RESET FRAME COUNTER AND CLOCK DIVIDER ***
-	lda #$C0		; synchronize the sound playback routine 
-	sta $4017		; to the internal timing of the NES
-; *** SET SONG # & PAL/NTSC SETTING ***
-	lda #$00		; replace dashes with song number
-	ldx #$00
-	jsr INIT
-; *** ENABLE VBLANK NMI ***
-	lda #%10000000		; enable vblank interrupts by setting the 
-	sta $2000		; most significant bit of $2000
-Loop:
-	jmp Loop		; loop loop loop loop ...		
-NMI:
-	lda $2002		; read $2002 to reset the vblank flag
-	lda #%00000000		; clear the first PPU control register  
-	sta $2000		; writing 0 to it
-	lda #%10000000		; reenable vblank interrupts by setting
-	sta $2000		; the most significant bit of $2000
-	jsr PLAY
-IRQ:
-	rti			; return from interrupt routine
-	.segment "VECTORS"
-	.word NMI, RESET, IRQ
+
+.include "caller.asm"
 
 .endif
