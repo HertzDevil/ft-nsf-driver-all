@@ -212,11 +212,10 @@ ft_run_instrument:
 ;
 ft_run_sequence:
 	clc
-	adc #$04;3						; Offset is 3 items
+	adc #$04						; Offset is 4 items
 	tay
 	lda (var_Temp_Pointer), y
 	sta var_sequence_result
-;	brk
 	dey
 	dey
 	dey ; (remove)
@@ -233,7 +232,7 @@ ft_run_sequence:
 	lda (var_Temp_Pointer), y		; Check loop point
 	cmp #$FF
 	bne @LoopSequence
-	lda #$FF						; Disable sequence by loading $FF into length
+;	lda #$FF						; Disable sequence by loading $FF into length
 	rts
 @LoopSequence:						; Just return A
     pha
@@ -545,10 +544,15 @@ ft_load_instrument_n163:
     sta var_ch_WavePtrHi - N163_OFFSET, x
     iny
 .endif
+    lda var_NamcoInstrument, x
+    cmp var_Temp3
+    beq :+
     lda #$00             ; reset wave
     sta var_ch_DutyCycle, x
+    lda var_Temp3
     ; Load N163 wave
 ;    jsr ft_n163_load_wave
+:   sta var_NamcoInstrument, x
     jsr ft_load_instrument_2a03
     jsr ft_n163_load_wave2
     ldy var_Temp

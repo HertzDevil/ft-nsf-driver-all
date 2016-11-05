@@ -1,7 +1,7 @@
 ;
 ; The NSF music driver for FamiTracker
-; Version 2.9
-; By jsr (zxy965r@tninet.se)
+; Version 2.10
+; By jsr (jsr@famitracker.com)
 ; assemble with ca65
 ;
 ; Documentation is in readme.txt
@@ -25,7 +25,7 @@
 
 USE_BANKSWITCH = 1		; Enable bankswitching code
 USE_DPCM = 1			; Enable DPCM channel (currently broken, leave enabled to avoid trouble).
-						; Also leave enabled for expansion chips
+						; Also leave enabled when using expansion chips
 
 ;INC_MUSIC_ASM = 1		; Music is in assembler style
 ;RELOCATE_MUSIC = 1		; Enable if music data must be relocated
@@ -48,13 +48,16 @@ SPEED_SPLIT_POINT = 32  ; Speed/tempo split-point. Patched by the NSF exporter
 
 USE_EXP = 1             ; Enable expansion chips
 
+;SCALE_NOISE = 1         ; Enable 4 bit noise period scaling
+
+;CHANNEL_CONTROL = 1    ; Enable to access channel enable/disable routines
+
+
 ;
 ; Constants
 ;
 TUNE_PATTERN_LENGTH		= $00
 TUNE_FRAME_LIST_POINTER	= $01
-
-SOFT_CHANNELS = 0
 
 ; Setup the pattern number -> channel mapping, as exported by the tracker
 
@@ -386,6 +389,8 @@ var_NamcoChannels:      .res 1                      ; Number of active N163 chan
 var_AllChannels:        .res 1
 var_EffChannels:        .res 1
 var_NamcoChannelsReg:   .res 1
+
+var_NamcoInstrument:    .res 8
 .endif
 
 ; End of variable space
@@ -396,11 +401,18 @@ last_bss_var:			.res 1						; Not used
 
 ; NSF entry addresses
 
+.ifdef PACKAGE
+    .byte $46, $54, $44, $52, $56, $20
+    .byte $02, $0A
+.endif
+
 LOAD:
 INIT:
 	jmp	ft_music_init
 PLAY:
 	jmp	ft_music_play
+
+.ifdef CHANNEL_CONTROL
 
 ; Disable channel in X, X = {00 : Square 1, 01 : Square 2, 02 : Triangle, 03 : Noise, 04 : DPCM}
 ft_disable_channel:
@@ -428,6 +440,8 @@ ft_enable_channel:
 
 ft_channel_mask:
 	.byte $01, $02, $04, $08, $10
+
+.endif
 
 ; The rest of the code
     .include "init.s"
@@ -578,15 +592,6 @@ ft_music_addr:
 
     ; Include music
 .ifdef INC_MUSIC_ASM
-
-    .macro lb label
-        .byte (>label / $10) - 8
-    .endmacro
-
-    .macro l label
-        .word (label & $FFF) + $B000
-    .endmacro
-
     ; Included assembly file music, DPCM included
 	.include "music.asm"
 .else

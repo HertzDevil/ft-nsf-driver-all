@@ -170,7 +170,11 @@ ft_skip_row_update:
 	sbc #$01
 	sta var_ch_NoteCut, x
 	bne :+
-	sta var_ch_Note, x
+	sta var_ch_Note, x   ; todo: make a subroutine for note cut
+	sta var_ch_PortaToLo, x
+	sta var_ch_PortaToHi, x
+    sta var_ch_TimerPeriodLo, x
+    sta var_ch_TimerPeriodHi, x
 :	inx
 .ifdef USE_N163
     cpx var_AllChannels
@@ -282,7 +286,6 @@ ft_read_note:
 	sta var_ch_Note, x					; Note on
 	jsr ft_translate_freq
 
-
 	lda var_ch_NoteCut, x
 	bmi :+
 	lda #$00
@@ -300,7 +303,7 @@ ft_read_note:
 	cmp #CHAN_VRC7
 	bne :+
 	jsr ft_vrc7_trigger
-	jmp @ReadIsDone
+	jmp @ResetSlide
 :	; VRC7 skip
 .endif
 .ifdef USE_FDS
@@ -329,14 +332,15 @@ ft_read_note:
 	ora var_ch_DutyCycle, x
 	sta var_ch_DutyCycle, x
 
-	; Reset sweep
-	lda var_ch_Effect,x
+@ResetSlide:
+	; Clear the slide effect on new notes
+	lda var_ch_Effect, x
 	cmp #EFF_SLIDE_UP
 	beq :+
 	cmp #EFF_SLIDE_DOWN
 	bne :++
 :	lda #EFF_NONE
-	sta var_ch_Effect,x
+	sta var_ch_Effect, x
 :
 
 	cpx #$02							; Skip if not square
@@ -347,6 +351,11 @@ ft_read_note:
 @JumpToDone:
 	jmp @ReadIsDone
 @NoteRelease:
+;    lda var_ch_State, x
+;    cmp #$01
+;    bne :+
+;    jmp @ReadIsDone
+;:
 	lda #$01
 	sta var_ch_State, x
 .ifdef USE_DPCM
@@ -374,7 +383,7 @@ ft_read_note:
 	cmp #CHAN_2A03_DPCM
 	bne :+
 	jmp @ReadIsDone
-:
+:   lda #$00
 .endif
 .ifdef USE_VRC7
 ;	cpx #VRC7_CHANNEL					; Skip if not VRC7 channel
@@ -387,12 +396,14 @@ ft_read_note:
 	lda #$00							; Halt VRC7 channel
 	sta var_ch_vrc7_Command - VRC7_CHANNEL, x
 	jmp @ReadIsDone
-:
+:   lda #$00
 .endif
 	sta var_ch_Volume, x
 	sta var_ch_PortaToLo, x
 	sta var_ch_PortaToHi, x
-	cpx #$02							; Skip all over square channels
+    sta var_ch_TimerPeriodLo, x
+    sta var_ch_TimerPeriodHi, x
+	cpx #$02							; Skip all but the square channels
 	bcs :+
 	lda #$FF
 	sta var_ch_PrevFreqHigh, x
@@ -475,22 +486,27 @@ ft_get_pattern_byte:
 ;
 ft_command_table:
 	.word ft_cmd_instrument
+	.word ft_cmd_duration
+	.word ft_cmd_noduration
 	.word ft_cmd_speed
+	.word ft_cmd_tempo
 	.word ft_cmd_jump
 	.word ft_cmd_skip
 	.word ft_cmd_halt
 	.word ft_cmd_effvolume
-	.word ft_cmd_portamento
+	.word ft_cmd_clear
 	.word ft_cmd_porta_up
 	.word ft_cmd_porta_down
-	.word ft_cmd_sweep
+	.word ft_cmd_portamento
 	.word ft_cmd_arpeggio
 	.word ft_cmd_vibrato
 	.word ft_cmd_tremolo
 	.word ft_cmd_pitch
-	.word ft_cmd_delay
-	.word ft_cmd_dac
+	.word ft_cmd_reset_pitch
 	.word ft_cmd_duty
+	.word ft_cmd_delay
+	.word ft_cmd_sweep
+	.word ft_cmd_dac
 	.word ft_cmd_sample_offset
 	.word ft_cmd_slide_up
 	.word ft_cmd_slide_down
@@ -498,8 +514,6 @@ ft_command_table:
 	.word ft_cmd_note_cut
 	.word ft_cmd_retrigger
 	.word ft_cmd_dpcm_pitch
-	.word ft_cmd_duration
-	.word ft_cmd_noduration
 .ifdef USE_FDS
 	.word ft_cmd_fds_mod_depth
 	.word ft_cmd_fds_mod_rate_hi
@@ -564,17 +578,26 @@ ft_cmd_instrument:
 	jsr ft_get_pattern_byte
 	jsr ft_load_instrument
 	jmp ft_read_note
+; Set default note duration
+ft_cmd_duration:
+	jsr ft_get_pattern_byte
+	sta var_ch_DefaultDelay, x
+	jmp ft_read_note
+; No default note duration
+ft_cmd_noduration:
+	lda #$FF
+	sta var_ch_DefaultDelay, x
+	jmp ft_read_note
 ; Effect: Speed (Fxx)
 ft_cmd_speed:
 	jsr ft_get_pattern_byte
-conf_speed_patch:
-    cmp #SPEED_SPLIT_POINT                  ; This is patched by the exporter
-	bcc @SpeedIsTempo
-	sta var_Tempo
-	bcs @StoreDone
-@SpeedIsTempo:
 	sta var_Speed
-@StoreDone:
+	jsr ft_calculate_speed
+	jmp ft_read_note
+; Effect: Tempo (Fxx)
+ft_cmd_tempo:
+    jsr ft_get_pattern_byte
+    sta var_Tempo
 	jsr ft_calculate_speed
 	jmp ft_read_note
 ; Effect: Jump (Bxx)
@@ -603,7 +626,6 @@ ft_cmd_effvolume:
 ft_cmd_portamento:
 	jsr ft_get_pattern_byte
 	sta var_ch_EffParam, x
-	beq ResetEffect
 	lda #EFF_PORTAMENTO
 	sta var_ch_Effect, x
 	jmp ft_read_note
@@ -611,7 +633,6 @@ ft_cmd_portamento:
 ft_cmd_porta_up:
 	jsr ft_get_pattern_byte
 	sta var_ch_EffParam, x
-	beq ResetEffect
 	lda #EFF_PORTA_UP
 	sta var_ch_Effect, x
 	jmp ft_read_note
@@ -619,7 +640,6 @@ ft_cmd_porta_up:
 ft_cmd_porta_down:
 	jsr ft_get_pattern_byte
 	sta var_ch_EffParam, x
-	beq ResetEffect
 	lda #EFF_PORTA_DOWN
 	sta var_ch_Effect, x
 	jmp ft_read_note
@@ -627,11 +647,14 @@ ft_cmd_porta_down:
 ft_cmd_arpeggio:
 	jsr ft_get_pattern_byte
 	sta var_ch_EffParam, x
-	beq ResetEffect
+	lda #$00
+	sta var_ch_ArpeggioCycle, x
 	lda #EFF_ARPEGGIO
 	sta var_ch_Effect, x
 	jmp ft_read_note
-ResetEffect:					; Shared by 0, 1, 2, 3
+ft_cmd_clear:
+    lda #$00
+	sta var_ch_EffParam, x
 	sta var_ch_Effect, x
 	sta var_ch_PortaToLo, x
 	sta var_ch_PortaToHi, x
@@ -645,31 +668,21 @@ ft_cmd_sweep:
 ft_cmd_vibrato:
 	jsr ft_get_pattern_byte
 	pha
-
 	lda var_ch_VibratoSpeed, x
 	bne :++
-	;lda var_VibratoOffset
 	lda var_SongFlags
 	and #$02
 	beq :+
 	lda #48
-:
-	sta var_ch_VibratoPos, x	
+:	sta var_ch_VibratoPos, x
 :	pla
-
 	pha
 	and #$F0
 	sta var_ch_VibratoDepth, x
 	pla
 	and #$0F
 	sta var_ch_VibratoSpeed, x
-;	cmp #$00
-;	beq @ResetVibrato
 	jmp ft_read_note
-;@ResetVibrato:					; Clear vibrato
-;	lda var_VibratoOffset
-;	sta var_ch_VibratoPos, x
-;	jmp ft_read_note
 ; Effect: Tremolo (7xy)
 ft_cmd_tremolo:
 	jsr ft_get_pattern_byte
@@ -689,6 +702,10 @@ ft_cmd_tremolo:
 ft_cmd_pitch:
 	jsr ft_get_pattern_byte
 	sta var_ch_FinePitch, x
+	jmp ft_read_note
+ft_cmd_reset_pitch:
+    lda #$80
+    sta var_ch_FinePitch, x
 	jmp ft_read_note
 ; Effect: Delay (Gxx)
 ft_cmd_delay:
@@ -773,16 +790,6 @@ ft_cmd_dpcm_pitch:
 	jmp ft_read_note
 .endif
 ; End of effect column commands
-; Set default note duration
-ft_cmd_duration:
-	jsr ft_get_pattern_byte
-	sta var_ch_DefaultDelay, x
-	jmp ft_read_note
-; No default note duration
-ft_cmd_noduration:
-	lda #$FF
-	sta var_ch_DefaultDelay, x
-	jmp ft_read_note
 ; FDS
 
 .ifdef USE_FDS
@@ -934,6 +941,15 @@ LoadFrequency:
 	rts
 
 StoreNoise2:
+;    eor #$0F
+.ifdef SCALE_NOISE
+    asl a
+    asl a
+    asl a
+    asl a
+.endif
+    and #$0F
+    ora #$10
 	sta var_ch_TimerPeriodLo, x
 	lda #$00
 	sta var_ch_TimerPeriodHi, x
@@ -953,11 +969,9 @@ ft_translate_freq:
     pha
 	lda ft_channel_map, x
 	cmp #CHAN_2A03_DPCM				; Check if DPCM
-;	beq StoreDPCM
 	bne :+
 	jmp StoreDPCM
-:
-	pla
+:	pla
 .endif
 
 .ifdef USE_VRC7
@@ -1013,7 +1027,14 @@ ft_translate_freq:
 	jmp LoadFrequency
 	rts
 StoreNoise:							; Special case for noise
-
+;    eor #$0F
+.ifdef SCALE_NOISE
+    asl a
+    asl a
+    asl a
+    asl a
+.endif
+    ora #$10
     pha
 	lda var_ch_Effect, x
 	cmp #EFF_PORTAMENTO
@@ -1040,17 +1061,27 @@ StoreNoise:							; Special case for noise
 
 .ifdef USE_DPCM
 StoreDPCM:							; Special case for DPCM
-	lda var_dpcm_inst_list			; Optimize this maybe?
-	sta var_Temp16
-	lda var_dpcm_inst_list + 1
-	sta var_Temp16 + 1
-	pla
+
+    clc                             ; Multiply the DPCM instrument index by 3
+    pla                             ; and store in Temp16
+    pha
+    asl a
+    adc var_dpcm_inst_list
+    sta var_Temp16
+    lda #$00
+    adc var_dpcm_inst_list + 1
+    sta var_Temp16 + 1
+    clc
+    pla
+    adc var_Temp16
+    sta var_Temp16
+    lda #$00
+    adc var_Temp16 + 1
+    sta var_Temp16 + 1
 
 	sty var_Temp
-	tay
-	dey
-	dey
-	dey
+    ldy #$00
+
 	lda (var_Temp16), y				; Read pitch
 	sta var_ch_SamplePitch
 	iny

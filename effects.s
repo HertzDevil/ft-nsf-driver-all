@@ -16,6 +16,7 @@ ft_run_effects:
 	bpl :+
 	lda #$00
 :   sta var_ch_VolColumn, x
+    ; Then increase
 	lda var_ch_VolSlide, x
 	lsr a
 	lsr a
@@ -45,6 +46,7 @@ ft_run_effects:
 .endif
 
 ;.if 0
+ft_jump_to_effect:
 	; Arpeggio and portamento
 	lda var_ch_Effect, x
 	beq @NoEffect
@@ -107,19 +109,27 @@ ft_load_slide:
 	lda var_ch_EffParam, x			; Store speed
 	and #$0F						; Get note
 	sta var_Temp					; Store note in temp
-
 	lda var_ch_Effect, x
 	cmp #EFF_SLIDE_UP_LOAD
-	beq :+
+	beq @Add
 	lda var_ch_Note, x
 	sec
 	sbc var_Temp
-	jmp :++
-:	lda var_ch_Note, x
+	bpl :+
+	lda #$01
+:   bne :+
+    lda #$01
+:   jmp @Done
+@Add:
+	lda var_ch_Note, x
 	clc
 	adc var_Temp
-:	sta var_ch_Note, x
-	jsr	ft_translate_freq_only
+	cmp #96
+	bcc @Done
+    lda #96
+@Done:
+	sta var_ch_Note, x
+    jsr	ft_translate_freq_only
 	lda var_ch_TimerPeriodLo, x
 	sta var_ch_PortaToLo, x
 	lda var_ch_TimerPeriodHi, x
@@ -164,12 +174,25 @@ ft_load_slide:
 	beq :+
 	lda #EFF_SLIDE_UP
 	sta var_ch_Effect, x
-	rts
+	jmp ft_jump_to_effect
 :   lda #EFF_SLIDE_DOWN
 	sta var_ch_Effect, x
 :
 .endif
-	rts
+    ; Work-around for noise
+    cpx #$03
+    bne :++
+    cmp #EFF_SLIDE_UP
+    beq :+
+    lda #EFF_SLIDE_UP
+    sta var_ch_Effect, x
+    jmp ft_jump_to_effect
+
+;    rts
+:   lda #EFF_SLIDE_DOWN
+    sta var_ch_Effect, x
+:	;rts
+    jmp ft_jump_to_effect
 
 ft_calc_period:
 
@@ -412,13 +435,14 @@ ft_slide_up:
 	lda var_ch_TimerPeriodHi, x
 	sbc #$00
 	sta var_ch_TimerPeriodHi, x
-
+    bmi ft_slide_done
 	cmp var_ch_PortaToHi, x			    ; Compare high byte
 	bcc ft_slide_done
 	bne ft_slide_not_done
 	lda var_ch_TimerPeriodLo, x
 	cmp var_ch_PortaToLo, x				; Compare low byte
 	bcc ft_slide_done
+
 	jmp ft_post_effects
 
 ft_slide_down:

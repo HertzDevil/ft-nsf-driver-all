@@ -52,6 +52,18 @@ ft_music_init:
 	cpx #WAVE_CHANS
 	bne :-
 
+	lda var_SongFlags
+	and #$02
+	beq :++
+	lda #48
+	ldx #$00
+:	sta var_ch_VibratoPos, x
+    inx
+	cpx #WAVE_CHANS
+	bne :-
+    lda #$00
+:
+
 	; DPCM
 	sta var_ch_NoteCut + (CHANNELS - 1)
 
@@ -82,6 +94,10 @@ ft_music_init:
 
 .ifdef USE_VRC7
     jsr ft_init_vrc7
+.endif
+
+.ifdef USE_FDS
+    jsr ft_init_fds
 .endif
 
 	rts
@@ -515,9 +531,9 @@ ft_SkipToRow:
 @Effect:
     cmp #$80
     beq @LoadInstCmd
-	cmp #$B0                            ; Don't forget to update these!
+	cmp #$82
 	beq @EffectDuration
-	cmp #$B2
+	cmp #$84
 	beq @EffectNoDuration
 	pha
 	cmp #$8E							; remove pitch slide

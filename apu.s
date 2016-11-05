@@ -54,9 +54,9 @@ ft_update_apu:
 	rts
 @Play:
 
-	;
-	; Square 1
-	;
+; ==============================================================================
+;  Square 1
+; ==============================================================================
 	lda var_Channels
 	and #$01
 	bne :+
@@ -150,9 +150,9 @@ ft_update_apu:
 @SkipHighPartSq1:
 ;	jmp @Square2
 
-	;
-	; Square 2
-	;
+; ==============================================================================
+;  Square 2
+; ==============================================================================
 @Square2:
 	lda var_Channels
 	and #$02
@@ -170,8 +170,8 @@ ft_update_apu:
 
 	lda var_ch_VolColumn + 1		; Kill channel if volume column = 0
 	asl a
-	and #$F0
     beq @KillSquare2
+	and #$F0
 	sta var_Temp
 	lda var_ch_Volume + 1
 	beq @KillSquare2
@@ -249,9 +249,10 @@ ft_update_apu:
 	lda var_Channels
 	and #$04
 	beq @Noise
-	;
-	; Triangle
-	;
+
+; ==============================================================================
+;  Triangle
+; ==============================================================================
 	lda var_ch_Volume + 2
 	beq @KillTriangle
     lda var_ch_VolColumn + 2
@@ -281,9 +282,9 @@ ft_update_apu:
 	sta $4008
 @SkipTriangleKill:
 
-	;
-	; Noise
-	;
+; ==============================================================================
+;  Noise
+; ==============================================================================
 @Noise:
 	lda var_Channels
 	and #$08
@@ -324,9 +325,30 @@ ft_update_apu:
 	ror a
 	and #$80
 	sta var_Temp
+.if 0
+.ifdef SCALE_NOISE
+    ; Divide noise period by 16
 	lda var_ch_PeriodCalcLo + 3
-	and #$0F
-	eor #$0F
+	lsr a
+	lsr a
+	lsr a
+	lsr a
+.else
+    ; Limit noise period to range 0 - 15
+	lda var_ch_PeriodCalcHi + 3
+	bne :+
+	lda var_ch_PeriodCalcLo + 3
+    cmp #$10
+    bcc :++
+:   lda #$0F
+:   eor #$0F
+.endif
+.else
+; No limit
+	lda var_ch_PeriodCalcLo + 3
+    and #$0F
+    eor #$0F
+.endif
 	ora var_Temp
 	sta $400E
 	lda #$00
@@ -336,9 +358,10 @@ ft_update_apu:
 	lda #$30
 	sta $400C
 @DPCM:
-	;
-	; DPCM
-	;
+
+; ==============================================================================
+;  DPCM
+; ==============================================================================
 .ifdef USE_DPCM
 	lda var_Channels
 	and #$10
@@ -365,7 +388,7 @@ ft_update_apu:
 	bmi @SkipDAC
 	sta $4011
 @SkipDAC:
-	lda #$80						; Skip that later by storing a negative value
+	lda #$80						; store a negative value to mark that it's already updated
 	sta var_ch_DPCMDAC
 
 	lda var_ch_Note, x
@@ -378,6 +401,7 @@ ft_update_apu:
 	lda #$80
 	sta var_ch_DPCM_EffPitch
 
+
 	; Setup sample bank (if used)
  .ifdef USE_BANKSWITCH
 	lda var_ch_SampleBank
@@ -388,8 +412,8 @@ ft_update_apu:
 	sta $5FFD
 	adc #$01
 	sta $5FFE
-	adc #$01
-	sta $5FFF
+;	adc #$01
+;	sta $5FFF
 :
 .endif
 
@@ -457,5 +481,5 @@ ft_volume_table:
  	.byte 0, 1, 1, 2, 2, 3, 4, 5, 5, 6, 7, 8, 8, 9, 10, 11 
  	.byte 0, 1, 1, 2, 3, 4, 4, 5, 6, 7, 8, 8, 9, 10, 11, 12 
  	.byte 0, 1, 1, 2, 3, 4, 5, 6, 6, 7, 8, 9, 10, 11, 12, 13 
- 	.byte 0, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 
+ 	.byte 0, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
  	.byte 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 

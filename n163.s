@@ -67,8 +67,8 @@ ft_update_n163:
 	; Get volume
 	lda var_ch_VolColumn + N163_OFFSET, x		; Kill channel if volume column = 0
 	asl a
-	and #$F0
 	beq @KillChannel
+	and #$F0
 	sta var_Temp
 	lda var_ch_Volume + N163_OFFSET, x
 	beq @KillChannel
@@ -79,7 +79,12 @@ ft_update_n163:
     sbc var_ch_TremoloResult + N163_OFFSET, x
     bpl :+
     lda #$00
+:   bne :+
+    lda var_ch_VolColumn + N163_OFFSET, x
+    beq :+
+    lda #$01
 :
+
 	sta var_Temp
 
 	; Load frequency regs

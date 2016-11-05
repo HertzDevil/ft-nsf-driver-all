@@ -127,7 +127,11 @@ ft_update_vrc7:
 	lsr a
 	lsr a
 	lsr a
-	eor #$0F
+    sec
+    sbc var_ch_TremoloResult + VRC7_CHANNEL, x
+    bpl :+
+    lda #$00
+:	eor #$0F
 	ora var_ch_vrc7_Patch, x
 	sta $9030
 	jsr ft_vrc7_delay
@@ -410,9 +414,11 @@ ft_vrc7_load_slide:
 	cmp #EFF_SLIDE_UP_LOAD
 	bne :+
 	lda #EFF_SLIDE_DOWN
-	jmp :++
+	sta var_ch_Effect, x
+	jsr ft_vrc7_adjust_octave
+	rts
 :	lda #EFF_SLIDE_UP
-:	sta var_ch_Effect, x
+	sta var_ch_Effect, x
 	jsr ft_vrc7_adjust_octave
     rts
 
@@ -442,9 +448,11 @@ ft_vrc7_delay:
 	rts
 
 ; Fnum table, multiplied by 4 for higher resolution
+.define ft_vrc7_table 688, 732, 776, 820, 868, 920, 976, 1032, 1096, 1160, 1228, 1304
+
 ft_note_table_vrc7_l:
-	.byte 176, 212, 0, 48, 96, 148, 200, 4, 64, 128, 196, 12
+    .lobytes ft_vrc7_table
 ft_note_table_vrc7_h:
-	.byte 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5
+    .hibytes ft_vrc7_table
 ft_vrc7_cmd:
 	.byte $30, $20

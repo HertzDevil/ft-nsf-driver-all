@@ -25,6 +25,13 @@ ft_fds_volume:
 	lda #$01					; Round up to 1
 :	rts
 
+ft_init_fds:
+    lda #$00
+    sta $4023
+    lda #$83
+    sta $4023
+    rts
+
 ; Update FDS
 ft_update_fds:
 	lda var_PlayerFlags
