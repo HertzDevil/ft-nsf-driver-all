@@ -2,6 +2,65 @@
 ; Namco 163 expansion sound
 ;
 
+; Load N163 instrument
+ft_load_instrument_n163:
+    ldy #$00
+    lda (var_Temp_Pointer), y
+    sta var_ch_WaveLen - N163_OFFSET, x
+    iny
+    lda (var_Temp_Pointer), y
+    sta var_ch_WavePos - N163_OFFSET, x
+    iny
+.ifdef RELOCATE_MUSIC
+    clc
+    lda (var_Temp_Pointer), y
+	adc ft_music_addr
+    sta var_ch_WavePtrLo - N163_OFFSET, x
+    iny
+    lda (var_Temp_Pointer), y
+	adc ft_music_addr + 1
+    sta var_ch_WavePtrHi - N163_OFFSET, x
+    iny
+.else
+    lda (var_Temp_Pointer), y
+    sta var_ch_WavePtrLo - N163_OFFSET, x
+    iny
+    lda (var_Temp_Pointer), y
+    sta var_ch_WavePtrHi - N163_OFFSET, x
+    iny
+.endif
+    lda var_NamcoInstrument, x
+    cmp var_Temp3
+    beq :+
+    lda #$00             ; reset wave
+    sta var_ch_DutyCycle, x
+    lda var_Temp3
+    ; Load N163 wave
+;    jsr ft_n163_load_wave
+:   sta var_NamcoInstrument, x
+    jsr ft_load_instrument_2a03
+    jsr ft_n163_load_wave2
+    ldy var_Temp
+
+ft_load_n163_table:
+	pha
+	lda ft_channel_type, x
+	cmp #CHAN_N163
+	bne :+
+	lda #<ft_periods_n163		; Load N163 table
+	sta var_Note_Table
+	lda #>ft_periods_n163
+	sta var_Note_Table + 1
+	pla
+	rts
+:	lda	#<ft_periods_ntsc			; Load 2A03 table
+	sta var_Note_Table
+	lda #>ft_periods_ntsc
+	sta var_Note_Table + 1
+	pla
+	rts
+.endif
+
 N163_CH1 = 4
 N163_CH2 = 5
 N163_CH3 = 6

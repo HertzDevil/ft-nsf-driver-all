@@ -58,6 +58,24 @@ ft_do_row_update:
 	; It won't work if new pattern adresses are loaded before the delayed note is played
 	lda var_Load_Frame
 	beq @SkipFrameLoad
+
+	ldx #$00
+:	lda var_ch_Delay, x
+	beq :+
+	lda #$00
+	sta var_ch_Delay, x
+	jsr ft_read_pattern
+	lda var_ch_NoteCut, x
+	and #$7F
+	sta var_ch_NoteCut, x
+:	inx
+.ifdef USE_N163
+    cpx var_AllChannels
+.else
+	cpx #CHANNELS
+.endif
+	bne :--
+
 	lda #$00
 	sta var_Load_Frame
 	lda var_Current_Frame
@@ -114,21 +132,19 @@ ft_read_channels:
 	; Store next row number in Temp2
 	sta var_SkipTo
 .endif
+	lda #$01
+	sta var_Load_Frame
 	inc var_Current_Frame
 	lda var_Current_Frame
 	cmp var_Frame_Count
 	beq @RestartSong
 ;	jsr ft_load_frame
-	lda #$01
-	sta var_Load_Frame
 
 	jmp @NoPatternEnd
 @RestartSong:
 	lda #$00
 	sta var_Current_Frame
 ;	jsr ft_load_frame
-	lda #$01
-	sta var_Load_Frame
 
 	jmp @NoPatternEnd
 @NoSkip:
@@ -171,6 +187,10 @@ ft_skip_row_update:
 	sta var_ch_NoteCut, x
 	bne :+
 	sta var_ch_Note, x   ; todo: make a subroutine for note cut
+	lda ft_channel_map, x
+	cmp #$05
+	beq :+
+	lda #$00
 	sta var_ch_PortaToLo, x
 	sta var_ch_PortaToHi, x
     sta var_ch_TimerPeriodLo, x
@@ -250,7 +270,7 @@ ft_read_pattern:
 	; First setup the bank
 	lda var_ch_Bank, x
 	beq :+
-	sta $5FFB							; Patterns are located @ $B000-$BFFF
+	jsr ft_bankswitch						; Patterns are located @ $B000-$BFFF
 :	; Go on
 .endif
 .ifdef USE_FDS
@@ -330,6 +350,7 @@ ft_read_note:
 	lda #$00
 ;	sta var_ch_ArpeggioCycle, x
 
+	sta var_ch_ArpeggioCycle, x
 	lda var_ch_DutyCycle, x
 	and #$F0
 	sta var_ch_DutyCycle, x
@@ -359,11 +380,6 @@ ft_read_note:
 @JumpToDone:
 	jmp @ReadIsDone
 @NoteRelease:
-    lda var_ch_State, x
-    cmp #$01
-    beq @JumpToDone
-	lda #$01
-	sta var_ch_State, x
 .ifdef USE_DPCM
 	lda ft_channel_map, x
 	cmp #CHAN_2A03_DPCM
@@ -373,6 +389,11 @@ ft_read_note:
 	jmp @ReadIsDone
 :
 .endif
+    lda var_ch_State, x
+    cmp #$01
+    beq @JumpToDone
+	lda #$01
+	sta var_ch_State, x
 .ifdef USE_VRC7
     cpx #VRC7_CHANNEL
     bcs @JumpToDone
@@ -651,8 +672,6 @@ ft_cmd_porta_down:
 ft_cmd_arpeggio:
 	jsr ft_get_pattern_byte
 	sta var_ch_EffParam, x
-	lda #$00
-	sta var_ch_ArpeggioCycle, x
 	lda #EFF_ARPEGGIO
 	sta var_ch_Effect, x
 	jmp ft_read_note
@@ -835,66 +854,7 @@ ft_cmd_vrc7_patch_change:
 ; End of commands
 ;
 
-.ifdef USE_VRC6
-ft_load_vrc6_saw_table:
-	cpx #SAW_CHANNEL
-	bne :+
-	pha						; Load VRC6 sawtooth table
-	lda #<ft_periods_sawtooth
-	sta var_Note_Table
-	lda #>ft_periods_sawtooth
-	sta var_Note_Table + 1
-	pla
-	rts
-:	pha						; Load 2A03 table
-	lda #<ft_periods_ntsc
-	sta var_Note_Table
-	lda #>ft_periods_ntsc
-	sta var_Note_Table + 1
-	pla
-	rts
-.endif
 
-.ifdef USE_FDS
-ft_load_fds_table:
-	pha
-;	cpx #FDS_CHANNEL
-	lda ft_channel_type, x
-	cmp #CHAN_FDS
-	bne :+
-	lda #<ft_periods_fds		; Load FDS table
-	sta var_Note_Table
-	lda #>ft_periods_fds
-	sta var_Note_Table + 1
-	pla
-	rts
-:	lda	#<ft_periods_ntsc			; Load 2A03 table
-	sta var_Note_Table
-	lda #>ft_periods_ntsc
-	sta var_Note_Table + 1
-	pla
-	rts
-.endif
-
-.ifdef USE_N163
-ft_load_n163_table:
-	pha
-	lda ft_channel_type, x
-	cmp #CHAN_N163
-	bne :+
-	lda #<ft_periods_n163		; Load N163 table
-	sta var_Note_Table
-	lda #>ft_periods_n163
-	sta var_Note_Table + 1
-	pla
-	rts
-:	lda	#<ft_periods_ntsc			; Load 2A03 table
-	sta var_Note_Table
-	lda #>ft_periods_ntsc
-	sta var_Note_Table + 1
-	pla
-	rts
-.endif
 
 ;
 ; Translate the note in A to a frequency and stores in current channel
@@ -1130,6 +1090,13 @@ ft_restore_speed:
 	lda var_Tempo_Accum + 1
 	adc var_Tempo_Dec + 1
 	sta var_Tempo_Accum + 1
+	sec
+	lda var_Tempo_Accum
+	sbc var_Tempo_Modulus
+	sta var_Tempo_Accum
+	lda var_Tempo_Accum + 1
+	sbc var_Tempo_Modulus + 1
+	sta var_Tempo_Accum + 1
 	rts
 
 ; Calculate frame division from the speed and tempo settings
@@ -1171,6 +1138,10 @@ ft_calculate_speed:
 	sta var_Tempo_Count
 	lda ACC + 1
 	sta var_Tempo_Count + 1
+	lda EXT
+	sta var_Tempo_Modulus
+	lda EXT + 1
+	sta var_Tempo_Modulus + 1
 	pla
     tay
 

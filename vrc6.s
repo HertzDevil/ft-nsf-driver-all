@@ -6,6 +6,24 @@ VRC6_CH1 = 4
 VRC6_CH2 = 5
 VRC6_CH3 = 6
 
+ft_load_vrc6_saw_table:
+	cpx #SAW_CHANNEL
+	bne :+
+	pha						; Load VRC6 sawtooth table
+	lda #<ft_periods_sawtooth
+	sta var_Note_Table
+	lda #>ft_periods_sawtooth
+	sta var_Note_Table + 1
+	pla
+	rts
+:	pha						; Load 2A03 table
+	lda #<ft_periods_ntsc
+	sta var_Note_Table
+	lda #>ft_periods_ntsc
+	sta var_Note_Table + 1
+	pla
+	rts
+
 ft_update_vrc6:
 	lda var_PlayerFlags
 	bne @Play
@@ -50,9 +68,7 @@ ft_update_vrc6:
 	tax
 	pla
 	ora ft_duty_table_vrc6, x
-	bne :+
-	brk
-:
+
 	; Write to registers
 	sta $9000
 	lda	var_ch_PeriodCalcLo + VRC6_CH1

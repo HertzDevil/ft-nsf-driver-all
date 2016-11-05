@@ -1,7 +1,8 @@
 ;
 ; The NSF music driver for FamiTracker
-; Version 2.11
+; Version 2.12 (?)
 ; By jsr (jsr@famitracker.com)
+; Port from version 2.11 by HertzDevil
 ; assemble with ca65
 ;
 ; Documentation is in readme.txt
@@ -16,6 +17,12 @@
 ;
 ; Known bugs:
 ;
+
+
+
+; This port is exactly the same as the one at http://forums.famitracker.com/viewtopic.php?f=7&t=167, except
+; that the VER_046 macro has been removed as there is no need to keep track of assembly code from previous
+; versions; the repository's commit history takes care of this.
 
 
 
@@ -148,17 +155,17 @@ CHAN_VRC7_CHANNEL6		= 14
 CHAN_FDS_CHANNEL		= 15
 CHAN_MMC5_PULSE1		= 16
 CHAN_MMC5_PULSE2		= 17
-CHAN_N163_CHANNEL1		= 18
-CHAN_N163_CHANNEL2		= 19
-CHAN_N163_CHANNEL3		= 20
-CHAN_N163_CHANNEL4		= 21
-CHAN_N163_CHANNEL5		= 22
-CHAN_N163_CHANNEL6		= 23
-CHAN_N163_CHANNEL7		= 24
-CHAN_N163_CHANNEL8		= 25
-CHAN_S5B_SQUARE1		= 26
-CHAN_S5B_SQUARE2		= 27
-CHAN_S5B_SQUARE3		= 28
+CHAN_N163_CHANNEL1		= 19
+CHAN_N163_CHANNEL2		= 20
+CHAN_N163_CHANNEL3		= 21
+CHAN_N163_CHANNEL4		= 22
+CHAN_N163_CHANNEL5		= 23
+CHAN_N163_CHANNEL6		= 24
+CHAN_N163_CHANNEL7		= 25
+CHAN_N163_CHANNEL8		= 26
+CHAN_S5B_SQUARE1		= 27
+CHAN_S5B_SQUARE2		= 28
+CHAN_S5B_SQUARE3		= 29
 
 ; Header item offsets
 HEAD_SPEED				= 11
@@ -242,6 +249,7 @@ var_Load_Frame:			.res 1						; 1 if new frame should be loaded
 var_Tempo_Accum:		.res 2						; Variables for speed division
 var_Tempo_Count:		.res 2						;  (if tempo support is not needed then this can be optimized)
 var_Tempo_Dec:			.res 2
+var_Tempo_Modulus:		.res 2
 var_VolTemp:			.res 1						; So the Exx command will work
 var_Sweep:				.res 1						; This has to be saved
 
@@ -470,6 +478,18 @@ ft_channel_mask:
     .include "s5b.s"
 .endif
 
+ft_bankswitch:
+	sta $5FFB
+	rts
+ft_bankswitch2:
+	clc
+	sta $5FFC
+	adc #$01
+	sta $5FFD
+	adc #$01
+	sta $5FFE
+	rts
+
 ;
 ; Channel maps, will be moved to exported data
 ;
@@ -560,8 +580,8 @@ ft_channel_type:
 ; Vibrato table (256 bytes)
 ft_vibrato_table:
 	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-	.byte $00, $00, $00, $00, $00, $00, $01, $01, $01, $01, $01, $01, $01, $01, $01, $01
-	.byte $00, $00, $00, $00, $01, $01, $01, $01, $02, $02, $02, $02, $02, $02, $02, $02
+	.byte $00, $00, $00, $00, $00, $00, $00, $00, $01, $01, $01, $01, $01, $01, $01, $01
+	.byte $00, $00, $00, $00, $00, $01, $01, $01, $01, $01, $02, $02, $02, $02, $02, $02
 	.byte $00, $00, $00, $01, $01, $01, $02, $02, $02, $03, $03, $03, $03, $03, $03, $03
 	.byte $00, $00, $00, $01, $01, $02, $02, $03, $03, $03, $04, $04, $04, $04, $04, $04
 	.byte $00, $00, $01, $02, $02, $03, $03, $04, $04, $05, $05, $06, $06, $06, $06, $06

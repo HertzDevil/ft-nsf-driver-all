@@ -3,6 +3,26 @@
 ;  1 = trigger
 ;  80 = update
 
+ft_load_instrument_vrc7:
+	; Read VRC7 instrument
+	ldy #$00
+	lda (var_Temp_Pointer), y		            ; Load patch number
+	sta var_ch_vrc7_Patch - VRC7_CHANNEL, x		; vrc7 channel offset
+	sta var_ch_vrc7_DefPatch - VRC7_CHANNEL, x
+	bne :+							            ; Skip custom settings if patch > 0
+
+	; Store path to custom patch settings
+	clc
+	lda var_Temp_Pointer
+	adc #$01
+	sta var_ch_vrc7_CustomLo - VRC7_CHANNEL, x
+	lda var_Temp_Pointer + 1
+	adc #$00
+	sta var_ch_vrc7_CustomHi - VRC7_CHANNEL, x
+
+:	ldy var_Temp
+	rts
+
 VRC7_HALT       = $00
 VRC7_TRIGGER    = $01
 VRC7_HOLD_NOTE  = $80
