@@ -54,37 +54,32 @@ ft_update_fds:
 	sta $4080								; Volume
 
 	; Load frequency
-	lda var_ch_TimerCalculated + FDS_CHANNEL + EFF_CHANS
+	lda var_ch_PeriodCalcHi + FDS_CHANNEL
 	and #$F0
 	beq :+
 	lda #$FF
-	sta var_ch_TimerCalculated + FDS_CHANNEL
+	sta var_ch_PeriodCalcLo + FDS_CHANNEL
 	lda #$0F
-	sta var_ch_TimerCalculated + FDS_CHANNEL + EFF_CHANS
-:	lda var_ch_TimerCalculated + FDS_CHANNEL + EFF_CHANS
+	sta var_ch_PeriodCalcHi + FDS_CHANNEL
+:	lda var_ch_PeriodCalcHi + FDS_CHANNEL
 	sta $4083	; High
-	lda var_ch_TimerCalculated + FDS_CHANNEL
+	lda var_ch_PeriodCalcLo + FDS_CHANNEL
 	sta $4082	; Low
 
 	lda var_ch_ModDelayTick					; Modulation delay
 	bne @TickDownDelay
 ;	lda var_ch_ModDepth						; Skip if modulation is disabled
 ;	beq @DisableMod
-	
+
 	lda var_ch_ModDepth						; Skip if modulation is disabled
-	;lda #6
-;	lda #$05
 	ora #$80
 	sta $4084								; Store modulation depth
-	
+
 	lda var_ch_ModRate						; Modulation freq
-;	lda #1
 	sta $4086
 	lda var_ch_ModRate + 1
-	;lda #18
-;	lda #$0
 	sta $4087
-	
+
 @Return:
 	rts
 @TickDownDelay:
@@ -127,11 +122,11 @@ ft_load_fds_wave:
 	lda #$80
 	sta $4089		; Enable wave RAM
 	ldy #$00
-:	lda (var_Temp_Pointer), y
-	sta $4040, y
-	iny
-	cpy #$40
-	bne :-
+:	lda (var_Temp_Pointer), y		; 5
+	sta $4040, y					; 5
+	iny								; 2
+	cpy #$40						; 2
+	bne :-							; 3 = 17 cycles and 64 iterations = 1088 cycles
 	lda #$00
 	sta $4089		; Disable wave RAM
 	rts
@@ -142,36 +137,3 @@ ft_reset_modtable:
 	lda #$00
 	sta $4085
 	rts
-.if 0
-ft_load_fds_modtable:
-	lda #$80
-	sta $4087
-	lda #$00
-	sta $4085
-	; fill table in $4088
-	ldy #$00
-:	;lda #$00
-	lda example_mod_table, y
-	sta $4088
-	iny
-	cpy #$20
-	bne :-
-	rts
-.endif
-
-; ACC*AUX -> [AUX,EXT]  lo,hi
-;MULT:
-;	LDA #$00
-;    LDY #$09
-;@LOOP:	
-;	LSR
-;	ROR ACC
-;	BCC @MULT2
-;	CLC
-;	ADC AUX
-;@MULT2:
-;	DEY
-;	BNE @LOOP
-;	STA EXT
-;	RTS
-	

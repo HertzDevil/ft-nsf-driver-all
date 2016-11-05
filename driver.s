@@ -1,6 +1,6 @@
 ;
 ; The NSF music driver for FamiTracker
-; Version 2.5
+; Version 2.6
 ; By jsr (zxy965r@tninet.se)
 ; assemble with ca65
 ;
@@ -8,18 +8,25 @@
 ; 
 ; Tab stop is 4
 ;
-
 ;
 ; ToDo;
+;  - Namco
+;  - Sunsoft
+;  - Support for multiple chips
 ;
+;
+; Known bugs:
+;
+
+
 
 ;
 ; Assembler code switches
 ;
 
 USE_BANKSWITCH = 1		; Enable bankswitching code
-USE_DPCM = 1			; Enable DPCM channel (currently broken, leave enabled to avoid trouble). 
-						; Leave enabled for expansion chips
+USE_DPCM = 1			; Enable DPCM channel (currently broken, leave enabled to avoid trouble).
+						; Also leave enabled for expansion chips
 
 NTSC_PERIOD_TABLE = 1	; Enable this to include the NTSC period table
 PAL_PERIOD_TABLE = 1	; Enable this to include the PAL period table
@@ -121,8 +128,10 @@ EFF_SLIDE_DOWN			= 8
 var_Temp:				.res 1						; Temporary 8-bit
 var_Temp2:				.res 1
 var_Temp3:				.res 1
-var_Temp16:				.res 2						; Temporary 16-bit 
+var_Temp4:				.res 1
+var_Temp16:				.res 2						; Temporary 16-bit
 var_Temp_Pointer:		.res 2						; Temporary
+var_Temp_Pointer2:		.res 2
 var_Temp_Pattern:		.res 2						; Pattern address (temporary)
 var_Note_Table:			.res 2
 var_Temp_Inst:			.res 1
@@ -198,7 +207,8 @@ var_sequence_result:	.res 1
 ; Channel variables
 
 ; General channel variables, used by the pattern reader (all channels)
-var_ch_Pattern_addr:	.res CHANNELS * 2			; Holds current pattern address and position in it
+var_ch_PatternAddrLo:	.res CHANNELS				; Holds current pattern position
+var_ch_PatternAddrHi:	.res CHANNELS
 .ifdef USE_BANKSWITCH
 var_ch_Bank:			.res CHANNELS				; Pattern bank
 .endif
@@ -214,8 +224,10 @@ var_ch_DefaultDelay:	.res CHANNELS				; Default row delay, if exists
 
 ; Following is specific to chip channels (2A03, VRC6...)
 
-var_ch_TimerPeriod:		.res EFF_CHANS * 2			; Current channel note period
-var_ch_TimerCalculated:	.res EFF_CHANS * 2			; Frequency after fine pitch and vibrato has been applied
+var_ch_TimerPeriodHi:	.res EFF_CHANS				; Current channel note period
+var_ch_TimerPeriodLo:	.res EFF_CHANS
+var_ch_PeriodCalcLo:	.res EFF_CHANS 				; Frequency after fine pitch and vibrato has been applied
+var_ch_PeriodCalcHi:	.res EFF_CHANS
 var_ch_OutVolume:		.res CHANNELS				; Volume for the APU
 var_ch_VolSlide:		.res CHANNELS				; Volume slide
 
@@ -245,7 +257,8 @@ var_ch_SequencePtr5:	.res SFX_WAVE_CHANS
 var_ch_Effect:			.res EFF_CHANS				; Arpeggio & portamento
 var_ch_EffParam:		.res EFF_CHANS				; Effect parameter (used by portamento and arpeggio)
 
-var_ch_PortaTo:			.res EFF_CHANS * 2			; Portamento
+var_ch_PortaToHi:		.res EFF_CHANS 				; Portamento
+var_ch_PortaToLo:		.res EFF_CHANS
 var_ch_ArpeggioCycle:	.res EFF_CHANS				; Arpeggio cycle
 
 var_ch_VibratoPos:		.res EFF_CHANS				; Vibrato
@@ -267,6 +280,7 @@ var_ch_DPCMDAC:			.res 1						; DPCM delta counter setting
 var_ch_DPCM_Offset:		.res 1	
 var_ch_DPCM_Retrig:		.res 1						; DPCM retrigger
 var_ch_DPCM_RetrigCntr:	.res 1
+var_ch_DPCM_EffPitch:	.res 1
 .endif
 
 .ifdef USE_MMC5
@@ -276,11 +290,13 @@ var_ch_PrevFreqHighMMC5: .res 2					; MMC5
 .ifdef USE_VRC7
 var_ch_vrc7_CustomPatch: .res 1						; Keep track of the custom patch
 var_ch_vrc7_Patch:		 .res 6						; VRC7 patch
+var_ch_vrc7_DefPatch:	 .res 6
 var_ch_vrc7_Fnum:		 .res 6 * 2
 var_ch_vrc7_Bnum:		 .res 6
 var_ch_vrc7_ActiveNote:	 .res 6
 var_ch_vrc7_Command:	 .res 6						; 0 = halt, 1 = trigger, 80 = update
 var_ch_vrc7_OldOctave:	 .res 1						; Temp variable for old octave when triggering new notes
+var_ch_vrc7_EffPatch:	 .res 1						; V-command
 .endif
 
 .ifdef USE_FDS
@@ -289,6 +305,10 @@ var_ch_ModDelay:		.res 1
 var_ch_ModDepth:		.res 1
 var_ch_ModRate:			.res 2
 var_ch_ModDelayTick:	.res 1
+var_ch_ModEffDepth:		.res 1
+var_ch_ModEffRateHi:	.res 1
+var_ch_ModEffRateLo:	.res 1
+var_ch_ModEffWritten:	.res 1
 .endif
 
 ; End of variable space

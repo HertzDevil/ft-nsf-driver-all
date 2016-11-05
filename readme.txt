@@ -24,7 +24,7 @@ and NTSC/PAL setting in X. Then call ft_music_play in every NMI interrupt.
 
 Average CPU usage is somewhere between 1200-2000 cycles (4-6% of a video frame) 
 depending on the complexity of the song. Peak usage is higher, usually between
-10-15% when switching patterns. This will be improved in future versions.
+10-15% when switching patterns. This might be improved in future versions.
 
 
 How to combine different songs

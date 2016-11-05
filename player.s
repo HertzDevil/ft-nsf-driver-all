@@ -35,6 +35,10 @@ ft_do_row_update:
 	lda #$00
 	sta var_ch_DPCM_Retrig
 .endif
+.ifdef USE_FDS
+    lda #$00
+    sta var_ch_ModEffWritten
+.endif
 
 	; Switches to new frames are delayed to next row to resolve issues with delayed notes.
 	; It won't work if new pattern adresses are loaded before the delayed note is played
@@ -66,6 +70,30 @@ ft_read_channels:
 	inx
 	cpx #CHANNELS
 	bne ft_read_channels
+
+.ifdef USE_FDS
+    lda var_ch_ModEffWritten
+	and #$01
+    beq :+
+    ; FDS modulation depth
+    lda var_ch_ModEffDepth
+    sta var_ch_ModDepth
+:   lda var_ch_ModEffWritten
+	and #$02
+    beq :+
+    ; FDS modulation rate high
+    lda var_ch_ModEffRateHi
+    sta var_ch_ModRate + 1
+:   lda var_ch_ModEffWritten
+	and #$04
+    beq :+
+    ; FDS modulation rate low
+    lda var_ch_ModEffRateLo
+    sta var_ch_ModRate + 0
+:
+ 	lda #$00
+ 	sta var_ch_ModEffWritten
+.endif
 
 	; Should jump?
 	lda var_Jump
@@ -165,12 +193,12 @@ ft_loop_channels:
 	beq :+
 	jsr ft_update_channel				; Update instruments	
 :	jsr	ft_calc_freq
-	
+
 	inx
 	;cpx #WAVE_CHANS		; Skip DPCM
 	cpx #EFF_CHANS
 	bne ft_loop_channels
-	
+
 	; Finally update APU and expansion chip registers
 	jsr ft_update_apu
 .ifdef USE_VRC6
@@ -214,20 +242,29 @@ ft_read_pattern:
 :
 .endif
 	sta var_VolTemp
-	lda var_ch_Pattern_addr, x			; Load pattern address
+	lda var_ch_PatternAddrLo, x			; Load pattern address
 	sta var_Temp_Pattern
-	lda var_ch_Pattern_addr + CHANNELS, x
+	lda var_ch_PatternAddrHi, x
 	sta var_Temp_Pattern + 1
-	
+.ifdef USE_VRC7
+    lda #$FF
+    sta var_ch_vrc7_EffPatch
+.endif
+
 ft_read_note:
 	lda (var_Temp_Pattern), y			; Read pattern command
 	bpl :+
 	jmp @Effect
 :	beq @JumpToDone						; Rest
 	cmp #$7F
-	beq @NoteOff						; Note off
-	cmp #$7E
-	beq @NoteRelease					; Note release
+;	beq @NoteOff						; Note off
+	bne :+
+	jmp @NoteOff
+:	cmp #$7E
+;	beq @NoteRelease					; Note release
+	bne :+
+	jmp @NoteRelease
+:
 	; Read a note
 	sta var_ch_Note, x					; Note on
 	jsr ft_translate_freq
@@ -259,7 +296,7 @@ ft_read_note:
 	sta var_ch_Volume, x
 	lda #$00
 ;	sta var_ch_ArpeggioCycle, x
-	
+
 	lda var_ch_DutyCycle, x
 	and #$F0
 	sta var_ch_DutyCycle, x
@@ -290,6 +327,14 @@ ft_read_note:
 @NoteRelease:
 	lda #$01
 	sta var_ch_State, x
+.ifdef USE_DPCM
+	cpx #DPCM_CHANNEL					; Skip if DPCM
+	bne :+
+	lda #$FF
+	sta var_ch_Note, x
+	jmp @ReadIsDone
+:
+.endif
 .ifdef USE_VRC7
     cpx #VRC7_CHANNEL
     bcs @JumpToDone
@@ -312,12 +357,13 @@ ft_read_note:
 	bcs :+
 	lda #$00							; Halt VRC7 channel
 	sta var_ch_vrc7_Command - VRC7_CHANNEL, x
+
 	jmp @ReadIsDone
 :
 .endif
 	sta var_ch_Volume, x
-	sta var_ch_PortaTo, x
-	sta var_ch_PortaTo + WAVE_CHANS, x
+	sta var_ch_PortaToLo, x
+	sta var_ch_PortaToHi, x
 	cpx #$02							; Skip all over square channels
 	bcs :+
 	lda #$FF
@@ -332,14 +378,14 @@ ft_read_note:
 	and #$78
 	sta var_ch_VolColumn, x
 	iny
-	jmp ft_read_note	
+	jmp ft_read_note
 @InstCommand:							; Instrument change
 	pla
 	and #$0F
 	asl a
 	jsr ft_load_instrument
 	iny
-	jmp ft_read_note	
+	jmp ft_read_note
 @Effect:
 	pha
 	and #$F0
@@ -374,10 +420,10 @@ ft_read_is_done:
 	iny
 	tya
 	adc var_Temp_Pattern
-	sta var_ch_Pattern_addr, x
+	sta var_ch_PatternAddrLo, x
 	lda #$00
 	adc var_Temp_Pattern + 1
-	sta var_ch_Pattern_addr + CHANNELS, x
+	sta var_ch_PatternAddrHi, x
 
 	lda var_Sweep						; Check sweep
 	beq @EndPatternFetch
@@ -423,8 +469,17 @@ ft_command_table:
 	.word ft_cmd_vol_slide
 	.word ft_cmd_note_cut
 	.word ft_cmd_retrigger
+	.word ft_cmd_dpcm_pitch
 	.word ft_cmd_duration
 	.word ft_cmd_noduration
+.ifdef USE_FDS
+	.word ft_cmd_fds_mod_depth
+	.word ft_cmd_fds_mod_rate_hi
+	.word ft_cmd_fds_mod_rate_lo
+.endif
+.ifdef USE_VRC7
+    .word ft_cmd_vrc7_patch_change
+.endif
 ;	.word ft_cmd_expand
 
 ;
@@ -573,8 +628,8 @@ ft_cmd_arpeggio:
 	jmp ft_read_note
 ResetEffect:					; Shared by 0, 1, 2, 3
 	sta var_ch_Effect, x
-	sta var_ch_PortaTo, x
-	sta var_ch_PortaTo + WAVE_CHANS, x
+	sta var_ch_PortaToLo, x
+	sta var_ch_PortaToHi, x
 	jmp ft_read_note
 ; Effect: Hardware sweep (Hxy / Ixy)
 ft_cmd_sweep:
@@ -698,6 +753,11 @@ ft_cmd_retrigger:
 	sta var_ch_DPCM_RetrigCntr
 .endif
 :	jmp ft_read_note
+; Effect: DPCM pitch setting
+ft_cmd_dpcm_pitch:
+    jsr ft_get_pattern_byte
+    sta var_ch_DPCM_EffPitch
+	jmp ft_read_note
 ; End of effect column commands
 ; Set default note duration
 ft_cmd_duration:
@@ -709,6 +769,42 @@ ft_cmd_noduration:
 	lda #$FF
 	sta var_ch_DefaultDelay, x
 	jmp ft_read_note
+; FDS
+
+.ifdef USE_FDS
+
+ft_cmd_fds_mod_depth:
+	jsr ft_get_pattern_byte
+	sta var_ch_ModEffDepth
+	lda var_ch_ModEffWritten
+	ora #$01
+	sta var_ch_ModEffWritten
+	jmp ft_read_note
+ft_cmd_fds_mod_rate_hi:
+	jsr ft_get_pattern_byte
+	sta var_ch_ModEffRateHi
+	lda var_ch_ModEffWritten
+	ora #$02
+	sta var_ch_ModEffWritten
+	jmp ft_read_note
+ft_cmd_fds_mod_rate_lo:
+	jsr ft_get_pattern_byte
+	sta var_ch_ModEffRateLo
+	lda var_ch_ModEffWritten
+	ora #$04
+	sta var_ch_ModEffWritten
+	jmp ft_read_note
+
+.endif
+
+; VRC7
+.ifdef USE_VRC7
+ft_cmd_vrc7_patch_change:
+	jsr ft_get_pattern_byte
+	sta var_ch_vrc7_EffPatch
+	sta var_ch_vrc7_Patch - VRC7_CHANNEL, x
+	jmp ft_read_note
+.endif
 
 ;
 ; End of commands
@@ -770,7 +866,7 @@ ft_translate_freq_only:
 
 
 	cpx #NOISE_CHANNEL							; Check if noise
-	beq StoreNoise
+	beq StoreNoise2
 
 .ifdef USE_VRC6
 	jsr	ft_load_vrc6_saw_table
@@ -784,12 +880,18 @@ ft_translate_freq_only:
 	tay
 LoadFrequency:
 	lda (var_Note_Table), y
-	sta var_ch_TimerPeriod, x
+	sta var_ch_TimerPeriodLo, x
 	iny
 	lda (var_Note_Table), y
-	sta var_ch_TimerPeriod + EFF_CHANS, x
+	sta var_ch_TimerPeriodHi, x
 	ldy var_Temp
 	rts
+
+StoreNoise2:
+	sta var_ch_TimerPeriodLo, x
+	lda #$00
+	sta var_ch_TimerPeriodHi, x
+    rts
 
 ; Translate the note in A to a frequency and stores in current channel
 ; If portamento is enabled, store in PortaTo
@@ -834,32 +936,52 @@ ft_translate_freq:
 	bne @NoPorta
 	; Load portamento
 	lda (var_Note_Table), y
-	sta var_ch_PortaTo, x
+	sta var_ch_PortaToLo, x
 	iny
 	lda (var_Note_Table), y
-	sta var_ch_PortaTo + EFF_CHANS, x
+	sta var_ch_PortaToHi, x
 	ldy var_Temp
-	lda var_ch_TimerPeriod, x
-	ora var_ch_TimerPeriod + EFF_CHANS, x
+	lda var_ch_TimerPeriodLo, x
+	ora var_ch_TimerPeriodHi, x
 	bne @Return
-	lda var_ch_PortaTo, x
-	sta var_ch_TimerPeriod, x
-	lda var_ch_PortaTo + EFF_CHANS, x
-	sta var_ch_TimerPeriod + EFF_CHANS, x
+	lda var_ch_PortaToLo, x
+	sta var_ch_TimerPeriodLo, x
+	lda var_ch_PortaToHi, x
+	sta var_ch_TimerPeriodHi, x
 @Return:
 	rts
 @NoPorta:
 	jmp LoadFrequency
 	rts
 StoreNoise:							; Special case for noise
-	sta var_ch_TimerPeriod, x
+
+    pha
+	lda var_ch_Effect, x
+	cmp #EFF_PORTAMENTO
+	bne @NoPorta
+	pla
+	sta var_ch_PortaToLo, x
 	lda #$00
-	sta var_ch_TimerPeriod + EFF_CHANS, x
+	sta var_ch_PortaToHi, x
+	lda var_ch_TimerPeriodLo, x
+	ora var_ch_TimerPeriodHi, x
+	bne @Return
+	lda var_ch_PortaToLo, x
+	sta var_ch_TimerPeriodLo, x
+	lda var_ch_PortaToHi, x
+	sta var_ch_TimerPeriodHi, x
+@Return:
+	rts
+@NoPorta:
+    pla
+	sta var_ch_TimerPeriodLo, x
+	lda #$00
+	sta var_ch_TimerPeriodHi, x
 	rts
 
 .ifdef USE_DPCM
 StoreDPCM:							; Special case for DPCM
-	
+
 	pha
 	lda var_dpcm_inst_list			; Optimize this maybe?
 	sta var_Temp16
@@ -871,10 +993,10 @@ StoreDPCM:							; Special case for DPCM
 	tay
 	lda (var_Temp16), y				; Read pitch
 	sta var_ch_SamplePitch
-	iny 
+	iny
 	lda (var_Temp16), y				; Read sample
 	tay
-	
+
 	lda var_dpcm_pointers			; Load sample pointer list
 	sta var_Temp16
 	lda var_dpcm_pointers + 1

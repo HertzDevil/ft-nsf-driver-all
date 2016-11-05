@@ -24,16 +24,16 @@ ft_update_mmc5:
 	ora #$30					; and disable length counter and envelope
 	sta $5000
 	; Period table isn't limited to $7FF anymore
-	lda var_ch_TimerCalculated + EFF_CHANS + MMC5_CH1
+	lda var_ch_PeriodCalcHi + MMC5_CH1
 	and #$F8
 	beq :+
 	lda #$03
-	sta var_ch_TimerCalculated + EFF_CHANS + MMC5_CH1
+	sta var_ch_PeriodCalcHi + MMC5_CH1
 	lda #$FF
-	sta var_ch_TimerCalculated + MMC5_CH1
-:	lda var_ch_TimerCalculated + MMC5_CH1
+	sta var_ch_PeriodCalcLo + MMC5_CH1
+:	lda var_ch_PeriodCalcLo + MMC5_CH1
 	sta $5002
-	lda var_ch_TimerCalculated + EFF_CHANS + MMC5_CH1
+	lda var_ch_PeriodCalcHi + MMC5_CH1
 	cmp var_ch_PrevFreqHighMMC5
 	beq :+
 	sta $5003
@@ -64,16 +64,16 @@ ft_update_mmc5:
 	ora #$30					; and disable length counter and envelope
 	sta $5004
 	; Period table isn't limited to $7FF anymore
-	lda var_ch_TimerCalculated + EFF_CHANS + MMC5_CH2
+	lda var_ch_PeriodCalcHi + MMC5_CH2
 	and #$F8
 	beq :+
 	lda #$03
-	sta var_ch_TimerCalculated + EFF_CHANS + MMC5_CH2
+	sta var_ch_PeriodCalcHi + MMC5_CH2
 	lda #$FF
-	sta var_ch_TimerCalculated + MMC5_CH2
-:	lda var_ch_TimerCalculated + MMC5_CH2
+	sta var_ch_PeriodCalcLo + MMC5_CH2
+:	lda var_ch_PeriodCalcLo + MMC5_CH2
 	sta $5006
-	lda var_ch_TimerCalculated + EFF_CHANS + MMC5_CH2
+	lda var_ch_PeriodCalcHi + MMC5_CH2
 	cmp var_ch_PrevFreqHighMMC5 + 1
 	beq @Return
 	sta $5007

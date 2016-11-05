@@ -7,7 +7,6 @@ VRC7_HALT = $00
 VRC7_TRIGGER = $01
 VRC7_HOLD_NOTE = $80
 
-
 ft_translate_note_vrc7:
 	; Calculate Fnum & Bnum
 	; Input: A = note + 1
@@ -56,24 +55,6 @@ ft_update_vrc7:
 
 	ldx #$00					; x = channel
 @LoopChannels:
-.if 0
-    ; See if updating
-	lda var_ch_vrc7_Command, x
-	cmp #VRC7_HOLD_NOTE
-	beq @UpdateChannel
-
-	; Clear channel, this also serves as a retrigger
-	jsr ft_clear_vrc7
-
-	; Halt, quit
-	lda var_ch_vrc7_Command, x
-	cmp #VRC7_HALT
-	beq @NextChan
-
-	; Trigger, change to hold note
-	lda #VRC7_HOLD_NOTE
-	sta var_ch_vrc7_Command, x
-.endif
 
     ; Check note off
 	lda var_ch_Note + VRC7_CHANNEL, x
@@ -81,12 +62,10 @@ ft_update_vrc7:
 	lda #VRC7_HALT
 	sta var_ch_vrc7_Command, x
 :
-
     ; See if retrigger is needed
 	lda var_ch_vrc7_Command, x
 	cmp #VRC7_TRIGGER
 	bne @UpdateChannel
-
 
 	; Clear channel, this also serves as a retrigger
 	jsr ft_clear_vrc7
@@ -97,23 +76,11 @@ ft_update_vrc7:
 
 @UpdateChannel:
     ; Load period
-	lda var_ch_TimerCalculated + VRC7_CHANNEL, x
+	lda var_ch_PeriodCalcLo + VRC7_CHANNEL, x
 	sta var_Period
-	lda var_ch_TimerCalculated + VRC7_CHANNEL + EFF_CHANS, x
+	lda var_ch_PeriodCalcHi + VRC7_CHANNEL, x
 	and #$07
 	sta var_Period + 1
-
-.if 0
-	; Divide by 2
-	lsr var_Period + 1
-	ror var_Period
-	lsr var_Period + 1
-	ror var_Period
-.endif
-	;cpx #$02
-	;bne :+
-;	brk
-;:
 
 	clc
 	txa
@@ -149,8 +116,6 @@ ft_update_vrc7:
 	ora var_Temp2
 	sta $9030
 	jsr ft_vrc7_delay
-
-;	brk
 
 	clc
 	txa
@@ -216,8 +181,8 @@ ft_vrc7_adjust_octave:
 @ShiftFreq:
 	sty var_Temp
 	tay
-:	lsr var_ch_TimerPeriod + EFF_CHANS, x
-	ror var_ch_TimerPeriod, x
+:	lsr var_ch_TimerPeriodHi, x
+	ror var_ch_TimerPeriodLo, x
 	dey
 	bne :-
 	ldy var_Temp
@@ -226,8 +191,8 @@ ft_vrc7_adjust_octave:
 @ShiftFreq2:
 	sty var_Temp
 	tay
-:	lsr var_ch_PortaTo + EFF_CHANS, x
-	ror var_ch_PortaTo, x
+:	lsr var_ch_PortaToHi, x
+	ror var_ch_PortaToLo, x
 	dey
 	bne :-
 	ldy var_Temp
@@ -235,13 +200,10 @@ ft_vrc7_adjust_octave:
 
 ; Called when a new note is found from pattern reader
 ft_vrc7_trigger:
-;.if 0
  	cpx #$06
  	bne :+
-; 	rts
-;	brk
 	:
-;.endif
+
     lda var_ch_Effect, x
     cmp #EFF_PORTAMENTO
    	bne :+
@@ -259,8 +221,6 @@ ft_vrc7_trigger:
 	bne @Return
 	; Load portamento
 	lda var_ch_Note, x
-;	sec
-;	sbc #$01
 	beq @Return
 
 	lda var_ch_vrc7_OldOctave
@@ -281,8 +241,8 @@ ft_vrc7_get_freq:
 	bne :+
 	; Clear old frequency if channel was halted
 	lda #$00
-	sta var_ch_TimerPeriod, x
-	sta var_ch_TimerPeriod + EFF_CHANS, x
+	sta var_ch_TimerPeriodLo, x
+	sta var_ch_TimerPeriodHi, x
 :
 
 	lda var_ch_vrc7_Bnum - VRC7_CHANNEL, x
@@ -297,19 +257,19 @@ ft_vrc7_get_freq:
 	cmp #EFF_PORTAMENTO
 	bne @NoPorta
 	lda ft_note_table_vrc7_l, y
-	sta var_ch_PortaTo, x
+	sta var_ch_PortaToLo, x
 	lda ft_note_table_vrc7_h, y
-	sta var_ch_PortaTo + EFF_CHANS, x
-	
+	sta var_ch_PortaToHi, x
+
 	; Check if previous note was silent, move this frequency directly to it
-	lda var_ch_TimerPeriod, x
-	ora var_ch_TimerPeriod + EFF_CHANS, x
+	lda var_ch_TimerPeriodLo, x
+	ora var_ch_TimerPeriodHi, x
 	bne :+
 
-	lda var_ch_PortaTo, x
-	sta var_ch_TimerPeriod, x
-	lda var_ch_PortaTo + EFF_CHANS, x
-	sta var_ch_TimerPeriod + EFF_CHANS, x
+	lda var_ch_PortaToLo, x
+	sta var_ch_TimerPeriodLo, x
+	lda var_ch_PortaToHi, x
+	sta var_ch_TimerPeriodHi, x
 
 	lda #$80				; Indicate new note (no previous)
 	sta var_ch_vrc7_OldOctave
@@ -318,23 +278,32 @@ ft_vrc7_get_freq:
 
 @NoPorta:
 	lda ft_note_table_vrc7_l, y
-	sta var_ch_TimerPeriod, x
+	sta var_ch_TimerPeriodLo, x
 	lda ft_note_table_vrc7_h, y
-	sta var_ch_TimerPeriod + EFF_CHANS, x
+	sta var_ch_TimerPeriodHi, x
 
 :	lda ACC
 	sta var_ch_vrc7_Bnum - VRC7_CHANNEL, x
 
 	pla
 	tay
-	
+
 	lda #$00
 	sta var_ch_State, x
 
+	; VRC7 patch
+
+	lda var_ch_vrc7_EffPatch
+	cmp #$FF
+	beq :+
+	and #$F0
+	sta var_ch_vrc7_Patch - VRC7_CHANNEL, x
+	rts
+:;	lda var_ch_vrc7_DefPatch - VRC7_CHANNEL, x
+	;sta var_ch_vrc7_Patch - VRC7_CHANNEL, x
 	rts
 
 ft_vrc7_get_freq_only:
-
 	tya
 	pha
 
@@ -344,16 +313,16 @@ ft_vrc7_get_freq_only:
 	ldy EXT	; note index -> y
 
 	lda ft_note_table_vrc7_l, y
-	sta var_ch_TimerPeriod, x
+	sta var_ch_TimerPeriodLo, x
 	lda ft_note_table_vrc7_h, y
-	sta var_ch_TimerPeriod + EFF_CHANS, x
+	sta var_ch_TimerPeriodHi, x
 
 	lda var_ch_vrc7_Bnum - VRC7_CHANNEL, x
 	sta var_ch_vrc7_OldOctave
 
 	lda ACC
 	sta var_ch_vrc7_Bnum - VRC7_CHANNEL, x
-	
+
 	lda #$00
 	sta var_ch_State, x
 
@@ -366,9 +335,9 @@ ft_vrc7_get_freq_only:
 ;
 ft_vrc7_load_slide:
 
-	lda var_ch_TimerPeriod, x
+	lda var_ch_TimerPeriodLo, x
 	pha
-	lda var_ch_TimerPeriod + EFF_CHANS, x
+	lda var_ch_TimerPeriodHi, x
 	pha
 
 	; Load note
@@ -390,10 +359,10 @@ ft_vrc7_load_slide:
 
 	jsr ft_translate_freq_only
 
-	lda var_ch_TimerPeriod, x
-	sta var_ch_PortaTo, x
-	lda var_ch_TimerPeriod + EFF_CHANS, x
-	sta var_ch_PortaTo + EFF_CHANS, x
+	lda var_ch_TimerPeriodLo, x
+	sta var_ch_PortaToLo, x
+	lda var_ch_TimerPeriodHi, x
+	sta var_ch_PortaToHi, x
 
     ; Store speed
 	lda var_ch_EffParam, x
@@ -405,9 +374,9 @@ ft_vrc7_load_slide:
 
     ; Load old period
 	pla
-	sta var_ch_TimerPeriod + EFF_CHANS, x
+	sta var_ch_TimerPeriodHi, x
 	pla
-	sta var_ch_TimerPeriod, x
+	sta var_ch_TimerPeriodLo, x
 
     ; change mode to sliding
 	clc
@@ -429,13 +398,10 @@ ft_vrc7_delay:
 	pla
 	rts
 
-; Fnum table, multiplied by 4 for more resolution
+; Fnum table, multiplied by 4 for higher resolution
 ft_note_table_vrc7_l:
 	.byte 176, 212, 0, 48, 96, 148, 200, 4, 64, 128, 196, 12
-;	.byte 172, 181, 192, 204, 216, 229, 242, 1, 16, 32, 49, 67
 ft_note_table_vrc7_h:
 	.byte 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5
-;	.byte 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1
 ft_vrc7_cmd:
 	.byte $30, $20
-

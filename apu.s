@@ -71,7 +71,7 @@ ft_update_apu:
 	jsr ft_get_volume
 	beq @KillSquare1
 .endif
-	; Calculate volume	
+	; Calculate volume
 	lda var_ch_VolColumn + 0		; Kill channel if volume column = 0
 	asl a
 	and #$F0
@@ -93,13 +93,13 @@ ft_update_apu:
 	ora #$30					; And disable length counter and envelope
 	sta $4000
 	; Period table isn't limited to $7FF anymore
-	lda var_ch_TimerCalculated + EFF_CHANS
+	lda var_ch_PeriodCalcHi
 	and #$F8
 	beq @TimerOverflow1
 	lda #$07
-	sta var_ch_TimerCalculated + EFF_CHANS
+	sta var_ch_PeriodCalcHi
 	lda #$FF
-	sta var_ch_TimerCalculated
+	sta var_ch_PeriodCalcLo
 @TimerOverflow1:
 	
 	lda var_ch_Sweep 			; Check if sweep is active
@@ -111,16 +111,16 @@ ft_update_apu:
 	sta $4001
 	and #$7F
 	sta var_ch_Sweep
-	
-	lda var_ch_TimerCalculated
-	sta $4002
-	lda var_ch_TimerCalculated + EFF_CHANS
-	sta $4003
 
+	jsr @KillSweepUnit
+
+	lda var_ch_PeriodCalcLo
+	sta $4002
+	lda var_ch_PeriodCalcHi
+	sta $4003
 	lda #$FF
 	sta var_ch_PrevFreqHigh
-	
-;	jsr @KillSweepUnit
+
 	jmp @Square2
 
 @KillSquare1:
@@ -132,9 +132,9 @@ ft_update_apu:
 	lda #$08
 	sta $4001
 	jsr @KillSweepUnit
-	lda var_ch_TimerCalculated
+	lda var_ch_PeriodCalcLo
 	sta $4002
-	lda var_ch_TimerCalculated + EFF_CHANS
+	lda var_ch_PeriodCalcHi
 	cmp var_ch_PrevFreqHigh
 	beq @SkipHighPartSq1
 	sta $4003
@@ -152,10 +152,13 @@ ft_update_apu:
 	jmp @Triangle
 :
 	lda var_ch_Note + 1
-	beq @KillSquare2
-	
+;	beq @KillSquare2
+	bne :+
+	jmp @KillSquare2
+:
+
 	.if 1
-	; Calculate volume	
+	; Calculate volume
 	lda var_ch_VolColumn + 1		; Kill channel if volume column = 0
 	asl a
 	and #$F0
@@ -168,14 +171,14 @@ ft_update_apu:
 	lda ft_volume_table, x
 	.endif
 
-	.if 0	
+	.if 0
 	ldx #$01
 	jsr ft_get_volume
 	beq @KillSquare2
 	.endif
-	
+
 	; Write to registers
-	pha 
+	pha
 	lda var_ch_DutyCycle + 1
 	and #$03
 	tax
@@ -184,16 +187,16 @@ ft_update_apu:
 	ora #$30
 	sta $4004
 	; Period table isn't limited to $7FF anymore
-	lda var_ch_TimerCalculated + 1 + EFF_CHANS
+	lda var_ch_PeriodCalcHi + 1
 	and #$F8
 	beq @TimerOverflow2
 	lda #$07
-	sta var_ch_TimerCalculated + 1 + EFF_CHANS
+	sta var_ch_PeriodCalcHi + 1
 	lda #$FF
-	sta var_ch_TimerCalculated + 1
+	sta var_ch_PeriodCalcLo + 1
 @TimerOverflow2:
-	
-	lda var_ch_Sweep + 1		; Check if there should be sweep 
+
+	lda var_ch_Sweep + 1		; Check if there should be sweep
 	beq @NoSquare2Sweep
 	and #$80
 	beq @Triangle				; See if sweep is triggered
@@ -201,21 +204,24 @@ ft_update_apu:
 	sta $4005
 	and #$7F
 	sta var_ch_Sweep + 1
+	
+	jsr @KillSweepUnit
+
+	lda var_ch_PeriodCalcLo + 1	; Could this be done by that below? I don't know
+	sta $4006
+	lda var_ch_PeriodCalcHi + 1
+	sta $4007
 	lda #$FF
 	sta var_ch_PrevFreqHigh + 1
-	lda var_ch_TimerCalculated + 1	; Could this be done by that below? I don't know
-	sta $4006
-	lda var_ch_TimerCalculated + EFF_CHANS + 1
-	sta $4007
-;	jsr @KillSweepUnit
+
 	jmp @Triangle
 @NoSquare2Sweep:				; No Sweep
 	lda #$08
 	sta $4005
 	jsr @KillSweepUnit
-	lda var_ch_TimerCalculated + 1
+	lda var_ch_PeriodCalcLo + 1
 	sta $4006
-	lda var_ch_TimerCalculated + EFF_CHANS + 1
+	lda var_ch_PeriodCalcHi + 1
 	cmp var_ch_PrevFreqHigh + 1
 	beq @SkipHighPartSq2
 	sta $4007
@@ -241,19 +247,19 @@ ft_update_apu:
 	lda #$81
 	sta $4008
 	; Period table isn't limited to $7FF anymore
-	lda var_ch_TimerCalculated + 2 + EFF_CHANS
+	lda var_ch_PeriodCalcHi + 2
 	and #$F8
 	beq @TimerOverflow3
 	lda #$07
-	sta var_ch_TimerCalculated + 2 + EFF_CHANS
+	sta var_ch_PeriodCalcHi + 2
 	lda #$FF
-	sta var_ch_TimerCalculated + 2
+	sta var_ch_PeriodCalcLo + 2
 @TimerOverflow3:	
 ;	lda #$08
 ;	sta $4009
-	lda var_ch_TimerCalculated + 2
+	lda var_ch_PeriodCalcLo + 2
 	sta $400A
-	lda var_ch_TimerCalculated + EFF_CHANS + 2
+	lda var_ch_PeriodCalcHi + 2
 	sta $400B
 	jmp @SkipTriangleKill
 @KillTriangle:
@@ -299,10 +305,10 @@ ft_update_apu:
 	ror a
 	and #$80
 	sta var_Temp
-	lda var_ch_TimerCalculated + 3
+	lda var_ch_PeriodCalcLo + 3
 	and #$0F
-	ora var_Temp
 	eor #$0F
+	ora var_Temp
 	sta $400E
 	lda #$00
 	sta $400F
@@ -318,7 +324,7 @@ ft_update_apu:
 	lda var_Channels
 	and #$10
 	beq @Return
-	
+
 	lda var_ch_DPCM_Retrig			; Retrigger
 	beq :+
 	dec var_ch_DPCM_RetrigCntr
@@ -327,19 +333,24 @@ ft_update_apu:
 	lda #$01
 	sta var_ch_Note + DPCM_CHANNEL
 :
-	
+
 	lda var_ch_DPCMDAC				; See if delta counter should be updated
 	bmi @SkipDAC
 	sta $4011
 @SkipDAC:
 	lda #$80						; Skip that later by storing a negative value
 	sta var_ch_DPCMDAC
+
 	lda var_ch_Note + DPCM_CHANNEL
 	beq @KillDPCM
 	bmi @SkipDPCM
+	lda var_ch_DPCM_EffPitch
+	bpl :+
 	lda var_ch_SamplePitch
-	sta $4010
-	
+:	sta $4010
+	lda #$80
+	sta var_ch_DPCM_EffPitch
+
 	clc
 	lda var_ch_SamplePtr
 	adc var_ch_DPCM_Offset
@@ -359,11 +370,24 @@ ft_update_apu:
 	sta $4015
 	lda #$1F
 	sta $4015
+	rts
 @SkipDPCM:
+    cmp #$FF
+    beq @ReleaseDPCM
+	rts
+@ReleaseDPCM:
+; todo
+;	lda #$0F
+;	sta $4015
+;	lda #$80
+;	sta var_ch_Note + DPCM_CHANNEL
 	rts
 @KillDPCM:
 	lda #$0F
 	sta $4015
+	lda #$80
+	sta $4011
+	sta var_ch_Note + DPCM_CHANNEL
 .endif
 @Return:
 	rts

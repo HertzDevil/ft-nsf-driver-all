@@ -26,16 +26,16 @@ ft_update_vrc6:
 	ora ft_duty_table_vrc6, x
 	; Write to registers
 	sta $9000
-	lda	var_ch_TimerCalculated + VRC6_CH1
+	lda	var_ch_PeriodCalcLo + VRC6_CH1
 	sta $9001
-	lda	var_ch_TimerCalculated + VRC6_CH1 + EFF_CHANS
+	lda	var_ch_PeriodCalcHi + VRC6_CH1
 	ora #$80
 	sta $9002
 	bmi @VRC6_Chan2
 @KillChan1:
 	lda #$00
 	sta $9002
-	
+
 	; Update Pulse 2
 @VRC6_Chan2:
 	lda var_ch_Note + VRC6_CH2				; Kill channel if note = off
@@ -61,16 +61,16 @@ ft_update_vrc6:
 	ora ft_duty_table_vrc6, x
 	; Write to registers
 	sta $A000
-	lda	var_ch_TimerCalculated + VRC6_CH2
+	lda	var_ch_PeriodCalcLo + VRC6_CH2
 	sta $A001
-	lda	var_ch_TimerCalculated + VRC6_CH2 + EFF_CHANS
+	lda	var_ch_PeriodCalcHi + VRC6_CH2
 	ora #$80
 	sta $A002
 	bmi @VRC6_Chan3
 @KillChan2:
 	lda #$00
 	sta $A002
-	
+
 	; Update Sawtooth
 @VRC6_Chan3:
 	lda var_ch_Note + VRC6_CH3				; Kill channel if note = off
@@ -95,9 +95,9 @@ ft_update_vrc6:
 	ora ft_duty_table_vrc6, x
 	asl a
 	sta $B000
-	lda	var_ch_TimerCalculated + VRC6_CH3
+	lda	var_ch_PeriodCalcLo + VRC6_CH3
 	sta $B001
-	lda	var_ch_TimerCalculated + VRC6_CH3 + EFF_CHANS
+	lda	var_ch_PeriodCalcHi + VRC6_CH3
 	ora #$80
 	sta $B002
 	rts

@@ -35,16 +35,18 @@ ft_music_init:
 	lda #$FF		; Enable all channels
 	sta var_Channels
 
+	sta var_ch_DPCM_EffPitch
+
 	; Reset some variables for the wave channels
 	lda #$00
 	tax
 :	sta var_ch_NoteCut, x
 	sta var_ch_Effect, x
 	sta var_ch_EffParam, x
-	sta var_ch_PortaTo, x
-	sta var_ch_PortaTo + WAVE_CHANS, x
-	sta var_ch_TimerPeriod, x
-	sta var_ch_TimerPeriod + EFF_CHANS, x
+	sta var_ch_PortaToLo, x
+	sta var_ch_PortaToHi, x
+	sta var_ch_TimerPeriodLo, x
+	sta var_ch_TimerPeriodHi, x
 	inx
 	cpx #WAVE_CHANS
 	bne :-
@@ -292,11 +294,11 @@ ft_load_frame:
 	clc
 	lda (var_Temp_Pointer), y			; Load the pattern address for the channel
 	adc ft_music_addr
-	sta var_ch_Pattern_addr, x
+	sta var_ch_PatternAddrLo, x
 	iny
 	lda (var_Temp_Pointer), y			; Pattern address, high byte
 	adc ft_music_addr + 1
-	sta var_ch_Pattern_addr + CHANNELS, x
+	sta var_ch_PatternAddrHi, x
 	iny
 	lda #$00
 	sta var_ch_NoteDelay, x
@@ -347,9 +349,9 @@ ft_SkipToRow:
 	
 @RowLoop:
 	ldy #$00
-	lda var_ch_Pattern_addr, x
+	lda var_ch_PatternAddrLo, x
 	sta var_Temp_Pointer
-	lda var_ch_Pattern_addr + CHANNELS, x
+	lda var_ch_PatternAddrHi, x
 	sta var_Temp_Pointer + 1
 
 @ReadNote:
@@ -380,10 +382,10 @@ ft_SkipToRow:
 	clc
 	tya
 	adc var_Temp_Pointer
-	sta var_ch_Pattern_addr, x
+	sta var_ch_PatternAddrLo, x
 	lda #$00
 	adc var_Temp_Pointer + 1
-	sta var_ch_Pattern_addr + CHANNELS, x
+	sta var_ch_PatternAddrHi, x
 	
 	dec var_Temp2						; Next row
 	bne @RowLoop
