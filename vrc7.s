@@ -7,6 +7,18 @@ VRC7_HALT = $00
 VRC7_TRIGGER = $01
 VRC7_HOLD_NOTE = $80
 
+ft_init_vrc7:
+    lda #$00
+    tax
+:   stx $9010
+    jsr ft_vrc7_delay
+    sta $9030
+    jsr ft_vrc7_delay
+    inx
+    cpx #$3F
+    bne :-
+    rts
+
 ft_translate_note_vrc7:
 	; Calculate Fnum & Bnum
 	; Input: A = note + 1
@@ -105,18 +117,7 @@ ft_update_vrc7:
 	lda ft_vrc7_cmd, y
 	sta var_Temp2
 
-:	clc
-	txa
-	adc #$20	; $20: High part of Fnum, Bnum, Note on & sustain on
-	sta $9010
-	jsr ft_vrc7_delay
-	lda var_ch_vrc7_Bnum, x
-	asl a
-	ora var_Period + 1
-	ora var_Temp2
-	sta $9030
-	jsr ft_vrc7_delay
-
+:
 	clc
 	txa
 	adc #$30	; $30: Patch & Volume
@@ -130,6 +131,19 @@ ft_update_vrc7:
 	ora var_ch_vrc7_Patch, x
 	sta $9030
 	jsr ft_vrc7_delay
+
+	clc
+	txa
+	adc #$20	; $20: High part of Fnum, Bnum, Note on & sustain on
+	sta $9010
+	jsr ft_vrc7_delay
+	lda var_ch_vrc7_Bnum, x
+	asl a
+	ora var_Period + 1
+	ora var_Temp2
+	sta $9030
+	jsr ft_vrc7_delay
+
 
 @NextChan:
 	inx
@@ -200,6 +214,18 @@ ft_vrc7_adjust_octave:
 
 ; Called when a new note is found from pattern reader
 ft_vrc7_trigger:
+
+    lda var_ch_vrc7_Patch - VRC7_CHANNEL, x
+    bne :+
+
+    lda var_ch_vrc7_CustomLo - VRC7_CHANNEL, x
+    sta var_CustomPatchPtr
+    lda var_ch_vrc7_CustomHi - VRC7_CHANNEL, x
+    sta var_CustomPatchPtr + 1
+
+    jsr ft_load_vrc7_custom_patch
+:
+
  	cpx #$06
  	bne :+
 	:
@@ -388,6 +414,23 @@ ft_vrc7_load_slide:
 :	lda #EFF_SLIDE_UP
 :	sta var_ch_Effect, x
 	jsr ft_vrc7_adjust_octave
+    rts
+
+; Load VRC7 custom patch registers
+ft_load_vrc7_custom_patch:
+    tya
+    pha
+    ldy #$00
+:	lda (var_CustomPatchPtr), y		            ; Load register
+	sty $9010						            ; Register index
+	jsr ft_vrc7_delay
+	sta $9030						            ; Store the setting
+	jsr ft_vrc7_delay
+	iny
+	cpy #$08
+	bne :-
+	pla
+	tay
     rts
 
 ft_vrc7_delay:

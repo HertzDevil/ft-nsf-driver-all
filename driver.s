@@ -1,11 +1,11 @@
 ;
 ; The NSF music driver for FamiTracker
-; Version 2.6
+; Version 2.7
 ; By jsr (zxy965r@tninet.se)
 ; assemble with ca65
 ;
 ; Documentation is in readme.txt
-; 
+;
 ; Tab stop is 4
 ;
 ;
@@ -28,6 +28,9 @@ USE_BANKSWITCH = 1		; Enable bankswitching code
 USE_DPCM = 1			; Enable DPCM channel (currently broken, leave enabled to avoid trouble).
 						; Also leave enabled for expansion chips
 
+;INC_MUSIC_ASM = 1		; Music is in assembler style
+;RELOCATE_MUSIC = 1		; Enable if music data must be relocated
+
 NTSC_PERIOD_TABLE = 1	; Enable this to include the NTSC period table
 PAL_PERIOD_TABLE = 1	; Enable this to include the PAL period table
 
@@ -37,11 +40,10 @@ ENABLE_ROW_SKIP = 1		; Enable this to add code for seeking to a row > 0 when usi
 ;USE_MMC5 = 1			; Enable this to include MMC5 code
 ;USE_VRC7 = 1			; Enable this to include VRC7 code
 ;USE_FDS = 1			; Enable this to include FDS code
-;USE_N106 = 1			; Enable this to include N106 code
+;USE_N163 = 1			; Enable this to include N163 code
 ;USE_5B = 1				; Enable this to include 5B code
 
 ;ENABLE_SFX = 1			; Enable this to enable sound effect support (not yet working)
-
 
 
 ;
@@ -49,6 +51,8 @@ ENABLE_ROW_SKIP = 1		; Enable this to add code for seeking to a row > 0 when usi
 ;
 TUNE_PATTERN_LENGTH		= $00
 TUNE_FRAME_LIST_POINTER	= $01
+
+SOFT_CHANNELS = 0
 
 ; Setup the pattern number -> channel mapping, as exported by the tracker
 
@@ -58,6 +62,7 @@ TUNE_FRAME_LIST_POINTER	= $01
 	VRC6_CHANNELS	= 4						; Start of VRC channels
 	SAW_CHANNEL		= VRC6_CHANNELS + 2		; Saw channel
 	WAVE_CHANS 		= CHANNELS - 1
+	VRC6_PERIOD_TABLE = 1
 .elseif .defined(USE_VRC7)		; 2A03 + VRC7 channels
 	CHANNELS		= 11
 	DPCM_CHANNEL	= 10
@@ -72,6 +77,16 @@ TUNE_FRAME_LIST_POINTER	= $01
 	DPCM_CHANNEL	= 5
 	FDS_CHANNEL		= 4
 	WAVE_CHANS		= CHANNELS - 1
+	FDS_PERIOD_TABLE = 1
+.elseif .defined(USE_N163)
+    CHANNELS	    = 13
+	WAVE_CHANS		= CHANNELS - 1
+	DPCM_CHANNEL	= CHANNELS - 1
+
+	N163_OFFSET 	= 4
+
+	N163_PERIOD_TABLE = 1
+
 .else							; 2A03 channels
 	.ifdef USE_DPCM
 		CHANNELS	 = 5
@@ -103,12 +118,46 @@ NOISE_CHANNEL = 3
 	SFX_WAVE_CHANS 	= WAVE_CHANS
 ;.endif
 
+CHAN_2A03				= 0
+CHAN_VRC6				= 2
+CHAN_VRC7				= 4
+CHAN_FDS				= 6
+CHAN_MMC5				= 8
+CHAN_N163				= 10
+CHAN_S5B				= 12
+
+CHAN_2A03_PULSE1		= 1
+CHAN_2A03_PULSE2		= 2
+CHAN_2A03_TRIANGLE		= 3
+CHAN_2A03_NOISE			= 4
+CHAN_2A03_DPCM			= 5
+CHAN_VRC6_PULSE1		= 6
+CHAN_VRC6_PULSE2		= 7
+CHAN_VRC6_SAWTOOTH		= 8
+CHAN_VRC7_CHANNEL1		= 9
+CHAN_VRC7_CHANNEL2		= 10
+CHAN_VRC7_CHANNEL3		= 11
+CHAN_VRC7_CHANNEL4		= 12
+CHAN_VRC7_CHANNEL5		= 13
+CHAN_VRC7_CHANNEL6		= 14
+CHAN_FDS_CHANNEL		= 15
+CHAN_MMC5_PULSE1		= 16
+CHAN_MMC5_PULSE2		= 17
+CHAN_N163_CHANNEL1		= 18
+CHAN_N163_CHANNEL2		= 19
+CHAN_N163_CHANNEL3		= 20
+CHAN_N163_CHANNEL4		= 21
+CHAN_N163_CHANNEL5		= 22
+CHAN_N163_CHANNEL6		= 23
+CHAN_N163_CHANNEL7		= 24
+CHAN_N163_CHANNEL8		= 25
+CHAN_S5B_SQUARE1		= 26
+CHAN_S5B_SQUARE2		= 27
+CHAN_S5B_SQUARE3		= 28
+
 ; Header item offsets
 HEAD_SPEED				= 11
 HEAD_TEMPO				= 12
-
-;SPEED_DIV_NTSC			= 60 * 60;
-;SPEED_DIV_PAL			= 60 * 50;
 
 EFF_NONE				= 0
 EFF_ARPEGGIO			= 1
@@ -134,7 +183,6 @@ var_Temp_Pointer:		.res 2						; Temporary
 var_Temp_Pointer2:		.res 2
 var_Temp_Pattern:		.res 2						; Pattern address (temporary)
 var_Note_Table:			.res 2
-var_Temp_Inst:			.res 1
 
 ACC:					.res 2						; Used by division routine
 AUX:					.res 2
@@ -143,8 +191,10 @@ EXT:					.res 2
 .ifdef USE_FDS
 var_Wave_pointer:		.res 2
 .endif
+
 .ifdef USE_VRC7
 var_Period:				.res 2
+var_CustomPatchPtr:     .res 2
 .endif
 
 last_zp_var:			.res 1						; Not used
@@ -169,7 +219,7 @@ var_Wavetables:			.res 2						; FDS waves
 .endif
 
 var_Channels:			.res 1						; Channel enable/disable
-	
+
 ; Track header (necessary to be in order)
 var_Frame_List:			.res 2						; Pattern list address
 var_Frame_Count:		.res 1						; Number of frames
@@ -228,12 +278,12 @@ var_ch_TimerPeriodHi:	.res EFF_CHANS				; Current channel note period
 var_ch_TimerPeriodLo:	.res EFF_CHANS
 var_ch_PeriodCalcLo:	.res EFF_CHANS 				; Frequency after fine pitch and vibrato has been applied
 var_ch_PeriodCalcHi:	.res EFF_CHANS
-var_ch_OutVolume:		.res CHANNELS				; Volume for the APU
+;var_ch_OutVolume:		.res CHANNELS				; Volume for the APU
 var_ch_VolSlide:		.res CHANNELS				; Volume slide
 
 ; --- Testing ---
 ;var_ch_LoopCounter:		.res CHANNELS
-; --- Testing --- 
+; --- Testing ---
 
 ; Square 1 & 2 variables
 var_ch_Sweep:			.res 2						; Hardware sweep
@@ -253,6 +303,10 @@ var_ch_SequencePtr3:	.res SFX_WAVE_CHANS
 var_ch_SequencePtr4:	.res SFX_WAVE_CHANS
 var_ch_SequencePtr5:	.res SFX_WAVE_CHANS
 
+;var_ch_fixed:			.res SFX_WAVE_CHANS
+
+var_ch_ArpFixed:        .res EFF_CHANS
+
 ; Track variables for effects
 var_ch_Effect:			.res EFF_CHANS				; Arpeggio & portamento
 var_ch_EffParam:		.res EFF_CHANS				; Effect parameter (used by portamento and arpeggio)
@@ -262,12 +316,12 @@ var_ch_PortaToLo:		.res EFF_CHANS
 var_ch_ArpeggioCycle:	.res EFF_CHANS				; Arpeggio cycle
 
 var_ch_VibratoPos:		.res EFF_CHANS				; Vibrato
-var_ch_VibratoDepth:	.res EFF_CHANS		
+var_ch_VibratoDepth:	.res EFF_CHANS
 var_ch_VibratoSpeed:	.res EFF_CHANS
 var_ch_TremoloPos:		.res EFF_CHANS				; Tremolo
 var_ch_TremoloDepth:	.res EFF_CHANS				; combine these
 var_ch_TremoloSpeed:	.res EFF_CHANS
-
+var_ch_TremoloResult:   .res EFF_CHANS
 ;var_ch_VibratoParam:	.res EFF_CHANS
 ;var_ch_TremoloParam:	.res EFF_CHANS
 
@@ -275,16 +329,17 @@ var_ch_TremoloSpeed:	.res EFF_CHANS
 .ifdef USE_DPCM
 var_ch_SamplePtr:		.res 1						; DPCM sample pointer
 var_ch_SampleLen:		.res 1						; DPCM sample length
+var_ch_SampleBank:		.res 1						; DPCM sample bank
 var_ch_SamplePitch:		.res 1						; DPCM sample pitch
 var_ch_DPCMDAC:			.res 1						; DPCM delta counter setting
-var_ch_DPCM_Offset:		.res 1	
+var_ch_DPCM_Offset:		.res 1
 var_ch_DPCM_Retrig:		.res 1						; DPCM retrigger
 var_ch_DPCM_RetrigCntr:	.res 1
 var_ch_DPCM_EffPitch:	.res 1
 .endif
 
 .ifdef USE_MMC5
-var_ch_PrevFreqHighMMC5: .res 2					; MMC5
+var_ch_PrevFreqHighMMC5: .res 2					    ; MMC5
 .endif
 
 .ifdef USE_VRC7
@@ -297,6 +352,10 @@ var_ch_vrc7_ActiveNote:	 .res 6
 var_ch_vrc7_Command:	 .res 6						; 0 = halt, 1 = trigger, 80 = update
 var_ch_vrc7_OldOctave:	 .res 1						; Temp variable for old octave when triggering new notes
 var_ch_vrc7_EffPatch:	 .res 1						; V-command
+
+var_ch_vrc7_CustomHi:    .res 6
+var_ch_vrc7_CustomLo:    .res 6
+
 .endif
 
 .ifdef USE_FDS
@@ -309,6 +368,22 @@ var_ch_ModEffDepth:		.res 1
 var_ch_ModEffRateHi:	.res 1
 var_ch_ModEffRateLo:	.res 1
 var_ch_ModEffWritten:	.res 1
+var_ch_ResetMod:        .res 1
+.endif
+
+.ifdef USE_N163
+;var_ch_Wave:            .res 8
+var_ch_WavePtrLo:       .res 8
+var_ch_WavePtrHi:       .res 8
+var_ch_WaveLen:         .res 8
+var_ch_WavePos:         .res 8
+
+var_ch_N163_LastHiFreq: .res 8
+
+var_NamcoChannels:      .res 1                      ; Number of active N163 channels
+var_AllChannels:        .res 1
+var_EffChannels:        .res 1
+var_NamcoChannelsReg:   .res 1
 .endif
 
 ; End of variable space
@@ -353,17 +428,17 @@ ft_channel_mask:
 	.byte $01, $02, $04, $08, $10
 
 ; The rest of the code
-	.include "init.s"
-	.include "player.s"
-	.include "effects.s"
-	.include "instrument.s"
-	.include "apu.s"
+    .include "init.s"
+    .include "player.s"
+    .include "effects.s"
+    .include "instrument.s"
+    .include "apu.s"
 
 .ifdef USE_VRC6
 	.include "vrc6.s"
 .endif
 .ifdef USE_VRC7
-	.include "vrc7.s"	
+	.include "vrc7.s"
 .endif
 .ifdef USE_MMC5
 	.include "mmc5.s"
@@ -371,29 +446,83 @@ ft_channel_mask:
 .ifdef USE_FDS
 	.include "fds.s"
 .endif
-.ifdef USE_N106
-	.include "n106.s"
+.ifdef USE_N163
+	.include "n163.s"
 .endif
 
-.ifdef PAL_PERIOD_TABLE
-ft_notes_pal:							; Note periods for PAL (remove this if you don't need PAL support)
-	.incbin "freq_pal.bin"
+;
+; Channel maps, will be moved to exported data
+;
+
+.if .defined(USE_VRC6)
+; VRC6
+ft_channel_map:
+    .byte CHAN_2A03_PULSE1, CHAN_2A03_PULSE2, CHAN_2A03_TRIANGLE, CHAN_2A03_NOISE
+	.byte CHAN_VRC6_PULSE1, CHAN_VRC6_PULSE2, CHAN_VRC6_SAWTOOTH
+	.byte CHAN_2A03_DPCM
+ft_channel_type:
+    .byte CHAN_2A03, CHAN_2A03, CHAN_2A03, CHAN_2A03
+	.byte CHAN_VRC6, CHAN_VRC6, CHAN_VRC6
+	.byte CHAN_2A03
+
+.elseif .defined(USE_VRC7)
+; VRC7
+ft_channel_map:
+    .byte CHAN_2A03_PULSE1, CHAN_2A03_PULSE2, CHAN_2A03_TRIANGLE, CHAN_2A03_NOISE
+	.byte CHAN_VRC7_CHANNEL1, CHAN_VRC7_CHANNEL2, CHAN_VRC7_CHANNEL3, CHAN_VRC7_CHANNEL4, CHAN_VRC7_CHANNEL5, CHAN_VRC7_CHANNEL6
+	.byte CHAN_2A03_DPCM
+ft_channel_type:
+    .byte CHAN_2A03, CHAN_2A03, CHAN_2A03, CHAN_2A03
+	.byte CHAN_VRC7, CHAN_VRC7, CHAN_VRC7, CHAN_VRC7, CHAN_VRC7, CHAN_VRC7
+	.byte CHAN_2A03
+
+.elseif .defined(USE_FDS)
+; FDS
+ft_channel_map:
+    .byte CHAN_2A03_PULSE1, CHAN_2A03_PULSE2, CHAN_2A03_TRIANGLE, CHAN_2A03_NOISE
+	.byte CHAN_FDS_CHANNEL
+	.byte CHAN_2A03_DPCM
+ft_channel_type:
+    .byte CHAN_2A03, CHAN_2A03, CHAN_2A03, CHAN_2A03
+	.byte CHAN_FDS
+	.byte CHAN_2A03
+
+.elseif .defined(USE_MMC5)
+; MMC5
+ft_channel_map:
+    .byte CHAN_2A03_PULSE1, CHAN_2A03_PULSE2, CHAN_2A03_TRIANGLE, CHAN_2A03_NOISE
+	.byte CHAN_MMC5_PULSE1, CHAN_MMC5_PULSE2
+	.byte CHAN_2A03_DPCM
+ft_channel_type:
+    .byte CHAN_2A03, CHAN_2A03, CHAN_2A03, CHAN_2A03
+	.byte CHAN_MMC5, CHAN_MMC5
+	.byte CHAN_2A03
+
+.elseif .defined(USE_N163)
+; N163
+ft_channel_map:
+    .byte CHAN_2A03_PULSE1, CHAN_2A03_PULSE2, CHAN_2A03_TRIANGLE, CHAN_2A03_NOISE
+	.byte CHAN_N163_CHANNEL1, CHAN_N163_CHANNEL2, CHAN_N163_CHANNEL3, CHAN_N163_CHANNEL4, CHAN_N163_CHANNEL5, CHAN_N163_CHANNEL6, CHAN_N163_CHANNEL7, CHAN_N163_CHANNEL8
+	.byte CHAN_2A03_DPCM
+ft_channel_type:
+    .byte CHAN_2A03, CHAN_2A03, CHAN_2A03, CHAN_2A03
+	.byte CHAN_N163, CHAN_N163, CHAN_N163, CHAN_N163, CHAN_N163, CHAN_N163, CHAN_N163, CHAN_N163
+	.byte CHAN_2A03
+
+.elseif .defined(USE_S5B)
+; todo
+
+.else
+; 2A03/2A07
+ft_channel_map:
+    .byte CHAN_2A03_PULSE1, CHAN_2A03_PULSE2, CHAN_2A03_TRIANGLE, CHAN_2A03_NOISE, CHAN_2A03_DPCM
+ft_channel_type:
+    .byte CHAN_2A03, CHAN_2A03, CHAN_2A03, CHAN_2A03, CHAN_2A03
+
 .endif
 
-.ifdef NTSC_PERIOD_TABLE
-ft_notes_ntsc:							; Note periods for NTSC (remove this if you don't need NTSC support)
-	.incbin "freq_ntsc.bin"
-.endif
-
-.ifdef USE_VRC6
-ft_periods_sawtooth:
-	.incbin "freq_sawtooth.bin"			; Note periods for VRC6 sawtooth
-.endif
-
-.ifdef USE_FDS
-ft_periods_fds:
-	.incbin "freq_fds.bin"				; Note periods for FDS
-.endif
+; Include period tables
+.include "periods.s"
 
 ; Vibrato table (256 bytes)
 ft_vibrato_table:
@@ -412,7 +541,9 @@ ft_vibrato_table:
 	.byte $00, $04, $08, $0C, $10, $14, $18, $1B, $1F, $22, $24, $26, $28, $2A, $2B, $2B
 	.byte $00, $06, $0C, $12, $18, $1E, $23, $28, $2D, $31, $35, $38, $3B, $3D, $3E, $3F
 	.byte $00, $09, $12, $1B, $24, $2D, $35, $3C, $43, $4A, $4F, $54, $58, $5B, $5E, $5F
-	.byte $00, $0C, $18, $25, $30, $3C, $47, $51, $5A, $62, $6A, $70, $76, $7A, $7D, $7F 
+	.byte $00, $0C, $18, $25, $30, $3C, $47, $51, $5A, $62, $6A, $70, $76, $7A, $7D, $7F
+
+; Todo: update the NSF exporter if offset to ft_vibrato_table is changed
 
 ;
 ; An example of including music follows
@@ -424,11 +555,19 @@ ft_vibrato_table:
 ft_music_addr:
 	.word * + 2					; This is the point where music data is stored
 
+
 .ifdef INC_MUSIC
+
+    ; Include music
+.ifdef INC_MUSIC_ASM
+    ; Included assembly file music, DPCM included
+	.include "music.asm"
+.else
+    ; Binary chunk music
 	.incbin "music.bin"			; Music data
 .ifdef USE_DPCM
 	.segment "DPCM"				; DPCM samples goes here
 	.incbin "samples.bin"
 .endif
 .endif
-
+.endif

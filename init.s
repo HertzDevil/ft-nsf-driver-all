@@ -54,11 +54,24 @@ ft_music_init:
 	; DPCM
 	sta var_ch_NoteCut + (CHANNELS - 1)
 
+.ifdef USE_VRC6
+    lda #$00
+    sta $9003
+.endif
+
 .ifdef USE_MMC5
 	lda #$03
 	sta $5015		; Enable channels
 .endif
-		
+
+.ifdef USE_N163
+    jsr ft_init_n163
+.endif
+
+.ifdef USE_VRC7
+    jsr ft_init_vrc7
+.endif
+
 	rts
 
 ;
@@ -82,10 +95,11 @@ ft_load_song:
 	sta var_Temp_Pointer
 	lda ft_music_addr + 1
 	sta var_Temp_Pointer + 1
-	
+
 	; Read the header and store in RAM
 	ldy #$00
 @LoadAddresses:
+.ifdef RELOCATE_MUSIC
 	clc
 	lda (var_Temp_Pointer), y
 	adc ft_music_addr
@@ -94,6 +108,13 @@ ft_load_song:
 	lda (var_Temp_Pointer), y			; Song list offset, high addr
 	adc ft_music_addr + 1
 	sta var_Song_list, y
+.else
+	lda (var_Temp_Pointer), y
+	sta var_Song_list, y
+	iny
+	lda (var_Temp_Pointer), y			; Song list offset, high addr
+	sta var_Song_list, y
+.endif
 	iny
 	cpy #$08							; 4 items
 	bne @LoadAddresses
@@ -104,6 +125,8 @@ ft_load_song:
 
 .ifdef USE_FDS
 	; Load FDS wave table pointer
+.ifdef RELOCATE_MUSIC
+	clc
 	lda (var_Temp_Pointer), y
 	adc ft_music_addr
 	sta var_Wavetables
@@ -111,6 +134,13 @@ ft_load_song:
 	lda (var_Temp_Pointer), y
 	adc ft_music_addr + 1
 	sta var_Wavetables + 1
+.else
+	lda (var_Temp_Pointer), y
+	sta var_Wavetables
+	iny
+	lda (var_Temp_Pointer), y
+	sta var_Wavetables + 1
+.endif
 	iny
 .endif
 
@@ -124,10 +154,14 @@ ft_load_song:
 	lda (var_Temp_Pointer), y
 	iny
 	sta var_Tempo_Dec + 1
-	lda #<ft_notes_ntsc
+	lda #<ft_periods_ntsc
 	sta var_Note_Table
-	lda #>ft_notes_ntsc
+	lda #>ft_periods_ntsc
 	sta var_Note_Table + 1
+.ifdef USE_N163
+    iny
+    iny
+.endif
 .endif
 	jmp @LoadDone
 @LoadPAL:
@@ -141,17 +175,38 @@ ft_load_song:
 	lda (var_Temp_Pointer), y
 	iny
 	sta var_Tempo_Dec + 1
-	lda #<ft_notes_pal
+	lda #<ft_periods_pal
 	sta var_Note_Table
-	lda #>ft_notes_pal
+	lda #>ft_periods_pal
 	sta var_Note_Table + 1
 .endif
  @LoadDone:
+ .ifdef USE_N163
+    ; N163 channel count
+	lda (var_Temp_Pointer), y
+	iny
+    sta var_NamcoChannels
+    clc
+    adc #$04             ; TODO fix this, should not be hardcoded
+    sta var_EffChannels
+    adc #$01
+    sta var_AllChannels
+    
+    ldx var_NamcoChannels
+    dex
+    txa
+    asl a
+    asl a
+    asl a
+    asl a
+    sta var_NamcoChannelsReg
+
+ .endif
 	pla
 	tay
 	; Load the song
 	jsr ft_load_track
-	
+
 	; Clear variables to zero
 	; Important!
 	ldx #$01
@@ -174,8 +229,13 @@ ft_load_song:
 	;
 	sta var_ch_Note, x
 	inx
+
+.ifdef USE_N163
+    cpx var_EffChannels
+.else
 	cpx #(CHANNELS - 1)
-	bne @ClearChannels2
+.endif
+    bne @ClearChannels2
 
 	ldx #$FF
 	stx var_ch_PrevFreqHigh			; Set prev freq to FF for Sq1 & 2
@@ -196,14 +256,14 @@ ft_load_song:
 	inx								; Jump to the first frame
 	stx var_Current_Frame
 	jsr ft_load_frame
-	
+
 	jsr ft_calculate_speed
 	;jsr ft_restore_speed
-	
+
 	lda #$00
 	sta var_Tempo_Accum
 	sta var_Tempo_Accum + 1
-	
+
 	rts
 
 ;
@@ -218,13 +278,14 @@ ft_load_song:
 ;	- Tempo, 1 byte
 ;
 ft_load_track:
-	; Load track header address	
+	; Load track header address
 	lda var_Song_list
 	sta var_Temp16
 	lda var_Song_list + 1
 	sta var_Temp16 + 1
-	
+
 	; Get the real address, song number * 2 will be in Y here
+.ifdef RELOCATE_MUSIC
 	clc
 	lda (var_Temp16), y
 	adc ft_music_addr
@@ -233,11 +294,19 @@ ft_load_track:
 	lda (var_Temp16), y
 	adc ft_music_addr + 1
 	sta var_Temp_Pointer + 1
-	
+.else
+	lda (var_Temp16), y
+	sta var_Temp_Pointer
+	iny
+	lda (var_Temp16), y
+	sta var_Temp_Pointer + 1
+.endif
+
 	; Read header
 	lda #$00
 	tax
 	tay
+.ifdef RELOCATE_MUSIC
 	clc
 	lda (var_Temp_Pointer), y			; Frame offset, low addr
 	adc ft_music_addr
@@ -246,6 +315,13 @@ ft_load_track:
 	lda (var_Temp_Pointer), y			; Frame offset, high addr
 	adc ft_music_addr + 1
 	sta var_Frame_List + 1
+.else
+	lda (var_Temp_Pointer), y			; Frame offset, low addr
+	sta var_Frame_List
+	iny
+	lda (var_Temp_Pointer), y			; Frame offset, high addr
+	sta var_Frame_List + 1
+.endif
 	iny
 @ReadLoop:
 	lda (var_Temp_Pointer), y			; Frame count
@@ -262,16 +338,17 @@ ft_load_track:
 ;
 ft_load_frame:
 .ifdef USE_BANKSWITCH
-	pha
+	pha						; Frame bank
 	lda var_InitialBank
 	beq :+
+;	sta $5FFA
 	sta $5FFB
 :	pla
 .endif
 
 	; Get the entry in the frame list
 	asl A					; Multiply by two
-	clc						; And add the frame list addr to get 
+	clc						; And add the frame list addr to get
 	adc var_Frame_List		; the pattern list addr
 	sta var_Temp16
 	lda #$00
@@ -280,6 +357,8 @@ ft_load_frame:
 	adc var_Frame_List + 1
 	sta var_Temp16 + 1
 	; Get the entry in the pattern list
+.ifdef RELOCATE_MUSIC
+	clc
 	lda (var_Temp16), y
 	adc ft_music_addr
 	sta var_Temp_Pointer
@@ -287,10 +366,18 @@ ft_load_frame:
 	lda (var_Temp16), y
 	adc ft_music_addr + 1
 	sta var_Temp_Pointer + 1
+.else
+	lda (var_Temp16), y
+	sta var_Temp_Pointer
+	iny
+	lda (var_Temp16), y
+	sta var_Temp_Pointer + 1
+.endif
 	; Iterate through the channels, x = channel
 	ldy #$00							; Y = address
-	stx var_Pattern_Pos	
+	stx var_Pattern_Pos
 @LoadPatternAddr:
+.ifdef RELOCATE_MUSIC
 	clc
 	lda (var_Temp_Pointer), y			; Load the pattern address for the channel
 	adc ft_music_addr
@@ -300,6 +387,14 @@ ft_load_frame:
 	adc ft_music_addr + 1
 	sta var_ch_PatternAddrHi, x
 	iny
+.else
+	lda (var_Temp_Pointer), y			; Load the pattern address for the channel
+	sta var_ch_PatternAddrLo, x
+	iny
+	lda (var_Temp_Pointer), y			; Pattern address, high byte
+	sta var_ch_PatternAddrHi, x
+	iny
+.endif
 	lda #$00
 	sta var_ch_NoteDelay, x
 	sta var_ch_Delay, x
@@ -307,7 +402,11 @@ ft_load_frame:
 	lda #$FF
 	sta var_ch_DefaultDelay, x
 	inx
+.ifdef USE_N163
+    cpx var_AllChannels
+.else
 	cpx #CHANNELS
+.endif
 	bne @LoadPatternAddr
 ; Bankswitch values
 .ifdef USE_BANKSWITCH
@@ -316,11 +415,15 @@ ft_load_frame:
 	beq @SkipBankValues					; Skip if no bankswitch info is stored
 	ldx #$00
 @LoadBankValues:
-	lda (var_Temp_Pointer), y			; Pattern bank number 
+	lda (var_Temp_Pointer), y			; Pattern bank number
 	sta var_ch_Bank, x
 	iny
 	inx
+.ifdef USE_N163
+    cpx var_AllChannels
+.else
 	cpx #CHANNELS
+.endif
 	bne @LoadBankValues
 @SkipBankValues:
 .endif
@@ -346,7 +449,7 @@ ft_SkipToRow:
 
 	lda #$00
 	sta var_ch_NoteDelay, x
-	
+
 @RowLoop:
 	ldy #$00
 	lda var_ch_PatternAddrLo, x
@@ -389,9 +492,13 @@ ft_SkipToRow:
 	
 	dec var_Temp2						; Next row
 	bne @RowLoop
-	
+
 	inx									; Next channel
-	cpx #CHANNELS
+.ifdef USE_N163
+    cpx var_AllChannels
+.else
+    cpx #CHANNELS
+.endif
 	bne @ChannelLoop
 	
 	pla									; fix the stack	
@@ -431,5 +538,5 @@ ft_SkipToRow:
 	jmp @ReadNote
 
 .else
-	rts	
+	rts
 .endif

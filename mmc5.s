@@ -1,3 +1,7 @@
+;
+; Nintendo MMC5 expansion sound
+;
+
 MMC5_CH1 = 4
 MMC5_CH2 = 5
 
@@ -5,13 +9,13 @@ ft_update_mmc5:
 	; MMC5 Square 1
 	lda var_ch_Note + MMC5_CH1		; Kill channel if note = off
 	beq @KillSquare1
-	; Calculate volume	
+	; Calculate volume
 	lda var_ch_VolColumn + MMC5_CH1		; Kill channel if volume column = 0
 	asl a
 	and #$F0
 	beq @KillSquare1
 	sta var_Temp
-	lda var_ch_OutVolume + MMC5_CH1		; Kill channel if volume = 0
+	lda var_ch_Volume + MMC5_CH1		; Kill channel if volume = 0
 	beq @KillSquare1
 	ora var_Temp
 	tay
@@ -20,6 +24,11 @@ ft_update_mmc5:
 	and #$03
 	tax
 	lda ft_volume_table, y
+    sec
+    sbc var_ch_TremoloResult + MMC5_CH1
+    bpl :+
+    lda #$00
+:
 	ora ft_duty_table, x		; Add volume
 	ora #$30					; and disable length counter and envelope
 	sta $5000
@@ -51,7 +60,7 @@ ft_update_mmc5:
 	and #$F0
 	beq @KillSquare2
 	sta var_Temp
-	lda var_ch_OutVolume + MMC5_CH2		; Kill channel if volume = 0
+	lda var_ch_Volume + MMC5_CH2		; Kill channel if volume = 0
 	beq @KillSquare2
 	ora var_Temp
 	tay
@@ -60,6 +69,11 @@ ft_update_mmc5:
 	and #$03
 	tax
 	lda ft_volume_table, y
+    sec
+    sbc var_ch_TremoloResult + MMC5_CH2
+    bpl :+
+    lda #$00
+:
 	ora ft_duty_table, x		; Add volume
 	ora #$30					; and disable length counter and envelope
 	sta $5004

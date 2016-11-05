@@ -1,3 +1,7 @@
+;
+; Konami VRC6 expansion sound
+;
+
 VRC6_CH1 = 4
 VRC6_CH2 = 5
 VRC6_CH3 = 6
@@ -12,11 +16,17 @@ ft_update_vrc6:
 	and #$F0
 	beq @KillChan1
 	sta var_Temp
-	lda var_ch_OutVolume + VRC6_CH1			; Kill channel if volume = 0
+	lda var_ch_Volume + VRC6_CH1			; Kill channel if volume = 0
 	beq @KillChan1
 	ora var_Temp 
 	tax
 	lda ft_volume_table, x					; Load from the 16*16 volume table
+    sec
+    sbc var_ch_TremoloResult + VRC6_CH1
+    bpl :+
+    lda #$00
+:
+
 	; Pulse width
 	pha
 	lda var_ch_DutyCycle + VRC6_CH1
@@ -46,11 +56,17 @@ ft_update_vrc6:
 	and #$F0
 	beq @KillChan2
 	sta var_Temp
-	lda var_ch_OutVolume + VRC6_CH2			; Kill channel if volume = 0
+	lda var_ch_Volume + VRC6_CH2			; Kill channel if volume = 0
 	beq @KillChan2
 	ora var_Temp
 	tax
 	lda ft_volume_table, x
+    sec
+    sbc var_ch_TremoloResult + VRC6_CH2
+    bpl :+
+    lda #$00
+:
+
 	; Pulse width
 	pha
 	lda var_ch_DutyCycle + VRC6_CH2
@@ -79,12 +95,17 @@ ft_update_vrc6:
 	lda var_ch_VolColumn + VRC6_CH3			; Kill channel if volume column = 0
 	asl a
 	and #$F0
-	beq @KillChan3
+;	beq @KillChan3
 	sta var_Temp
-	lda var_ch_OutVolume + VRC6_CH3			; Kill channel if volume = 0
+	lda var_ch_Volume + VRC6_CH3			; Kill channel if volume = 0
 	ora var_Temp
 	tax
 	lda ft_volume_table, x
+    sec
+    sbc var_ch_TremoloResult + VRC6_CH3
+    bpl :+
+    lda #$00
+:
 	; Use pulse width table t4o get the high part of volume
 	pha
 	lda var_ch_DutyCycle + VRC6_CH3
@@ -105,6 +126,6 @@ ft_update_vrc6:
 	lda #$00
 	sta $B002
 	rts
-	
+
 ft_duty_table_vrc6:
 	.byte $00, $10, $20, $30, $40, $50, $60, $70

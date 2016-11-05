@@ -20,7 +20,7 @@ ft_fds_volume:
 	beq :+
 	rts
 :	lda var_Temp
-	ora var_ch_OutVolume + FDS_CHANNEL
+	ora var_ch_Volume + FDS_CHANNEL
 	beq :+
 	lda #$01					; Round up to 1
 :	rts
@@ -37,18 +37,22 @@ ft_update_fds:
 	lda var_ch_Note + FDS_CHANNEL
 	beq @KillFDS
 
-	; Calculate volume	
+	; Calculate volume
 	lda var_ch_VolColumn + FDS_CHANNEL		; Kill channel if volume column = 0
 	lsr a
 	lsr a
 	lsr a
 	beq @KillFDS
 	sta var_Temp2							; 4 bit vol
-	lda var_ch_OutVolume + FDS_CHANNEL		; Kill channel if volume = 0
+	lda var_ch_Volume + FDS_CHANNEL		; Kill channel if volume = 0
 	beq @KillFDS
 	sta var_Temp							; 5 bit vol
 	jsr ft_fds_volume
-
+    sec
+    sbc var_ch_TremoloResult + FDS_CHANNEL
+    bpl :+
+    lda #$00
+:
 	; Load volume
 	ora #$80								; Disable the volume envelope
 	sta $4080								; Volume
@@ -65,6 +69,13 @@ ft_update_fds:
 	sta $4083	; High
 	lda var_ch_PeriodCalcLo + FDS_CHANNEL
 	sta $4082	; Low
+
+    lda var_ch_ResetMod
+    beq :+
+    lda #$00
+    sta $4085
+    sta var_ch_ResetMod
+:
 
 	lda var_ch_ModDelayTick					; Modulation delay
 	bne @TickDownDelay
@@ -87,7 +98,7 @@ ft_update_fds:
 @DisableMod:
 	; Disable modulation
 	lda #$80
-	sta $4084
+	sta $4087
 	rts
 @KillFDS:
 	lda #$80
@@ -99,30 +110,29 @@ ft_update_fds:
 
 ; Load the waveform, index in A
 ft_load_fds_wave:
-	;lda #$02
-	sta var_Temp_Pointer
+	sta var_Temp16
 	lda #$00
-	sta var_Temp_Pointer + 1
+	sta var_Temp16 + 1
 	; Multiply by 64
 	clc
 	ldy #$06
-:	rol var_Temp_Pointer
-	rol var_Temp_Pointer + 1
+:	rol var_Temp16
+	rol var_Temp16 + 1
 	dey
 	bne :-
 	; Setup a pointer to the specified wave
 	clc
 	lda var_Wavetables
-	adc var_Temp_Pointer
-	sta var_Temp_Pointer
+	adc var_Temp16
+	sta var_Temp16
 	lda var_Wavetables + 1
-	adc var_Temp_Pointer + 1
-	sta var_Temp_Pointer + 1
+	adc var_Temp16 + 1
+	sta var_Temp16 + 1
 	; Write wave
 	lda #$80
 	sta $4089		; Enable wave RAM
 	ldy #$00
-:	lda (var_Temp_Pointer), y		; 5
+:	lda (var_Temp16), y	          	; 5
 	sta $4040, y					; 5
 	iny								; 2
 	cpy #$40						; 2
@@ -130,10 +140,35 @@ ft_load_fds_wave:
 	lda #$00
 	sta $4089		; Disable wave RAM
 	rts
-	
+
 ft_reset_modtable:
 	lda #$80
 	sta $4087
 	lda #$00
 	sta $4085
 	rts
+
+ft_check_fds_effects:
+    lda var_ch_ModEffWritten
+	and #$01
+    beq :+
+    ; FDS modulation depth
+    lda var_ch_ModEffDepth
+    sta var_ch_ModDepth
+:   lda var_ch_ModEffWritten
+	and #$02
+    beq :+
+    ; FDS modulation rate high
+    lda var_ch_ModEffRateHi
+    sta var_ch_ModRate + 1
+:   lda var_ch_ModEffWritten
+	and #$04
+    beq :+
+    ; FDS modulation rate low
+    lda var_ch_ModEffRateLo
+    sta var_ch_ModRate + 0
+:
+ 	lda #$00
+ 	sta var_ch_ModEffWritten
+
+    rts

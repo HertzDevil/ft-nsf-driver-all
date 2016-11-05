@@ -15,7 +15,7 @@ ft_run_effects:
 	sbc var_Temp
 	bpl :+
 	lda #$00
-:	sta var_ch_VolColumn, x
+:   sta var_ch_VolColumn, x
 	lda var_ch_VolSlide, x
 	lsr a
 	lsr a
@@ -83,13 +83,13 @@ ft_run_effects:
 ft_post_effects:
 	rts
 
+.if 0
 ft_effect_table:
     .word ft_arpeggio, ft_portamento, ft_portamento_up, ft_portamento_down
     .word ft_load_slide, ft_slide_up, ft_load_slide, ft_slide_down
-
+.endif
 
 ft_load_slide:
-
 .ifdef USE_VRC7
 	cpx #VRC7_CHANNEL
 	bcc :+								; <
@@ -152,11 +152,28 @@ ft_load_slide:
 :
 .endif
 	sta var_ch_Effect, x
+.ifdef USE_N163
+    lda ft_channel_type, x
+    cmp #CHAN_N163
+    bne :++
+    asl var_ch_EffParam, x
+    asl var_ch_EffParam, x
+    ; Invert
+	lda var_ch_Effect, x
+	cmp #EFF_SLIDE_UP
+	beq :+
+	lda #EFF_SLIDE_UP
+	sta var_ch_Effect, x
+	rts
+:   lda #EFF_SLIDE_DOWN
+	sta var_ch_Effect, x
+:
+.endif
 	rts
 
-ft_calc_freq:
+ft_calc_period:
 
- 	; Load frequency
+ 	; Load period
 	lda var_ch_TimerPeriodLo, x
 	sta var_ch_PeriodCalcLo, x
 	lda var_ch_TimerPeriodHi, x
@@ -176,6 +193,44 @@ ft_calc_freq:
  	lda var_ch_FinePitch, x
  	cmp #$80
  	beq @Skip
+ 	
+;	.if 0
+
+.ifdef USE_N163
+    lda ft_channel_type, x
+    cmp #CHAN_N163
+    bne :+
+    ; N163 pitch
+    lda #$00
+    sta var_Temp16 + 1
+    lda var_ch_FinePitch, x
+    asl a
+    sta var_Temp16
+    rol var_Temp16 + 1
+    asl var_Temp16
+    rol var_Temp16 + 1
+    asl var_Temp16
+    rol var_Temp16 + 1
+    asl var_Temp16
+    rol var_Temp16 + 1
+	clc
+	lda var_ch_PeriodCalcLo, x
+	adc #$00
+	sta var_ch_PeriodCalcLo, x
+	lda var_ch_PeriodCalcHi, x
+	adc #$08
+	sta var_ch_PeriodCalcHi, x
+	sec
+	lda var_ch_PeriodCalcLo, x
+	sbc var_Temp16
+	sta var_ch_PeriodCalcLo, x
+	lda var_ch_PeriodCalcHi, x
+	sbc var_Temp16 + 1
+	sta var_ch_PeriodCalcHi, x
+    jmp @Skip
+:
+.endif
+
 	clc
 	lda var_ch_PeriodCalcLo, x
 	adc #$80
@@ -202,12 +257,12 @@ ft_calc_freq:
 ; Portamento
 ;
 ft_portamento:
-	lda var_ch_EffParam, x						; Check portamento, if speed > 0
+	lda var_ch_EffParam, x							; Check portamento, if speed > 0
 	beq @NoPortamento
-	lda var_ch_PortaToLo, x						; and if freq > 0, else stop
+	lda var_ch_PortaToLo, x							; and if freq > 0, else stop
 	ora var_ch_PortaToHi, x
 	beq @NoPortamento
-	lda var_ch_TimerPeriodHi, x		; Compare high byte
+	lda var_ch_TimerPeriodHi, x						; Compare high byte
 	cmp var_ch_PortaToHi, x
 	bcc @Increase
 	bne @Decrease
@@ -217,7 +272,15 @@ ft_portamento:
 	bne @Decrease
 	;rts											; done
 	jmp ft_post_effects
-@Decrease:											; Decrease frequency
+
+@Decrease:											; Decrease period
+    lda var_ch_EffParam, x
+    sta var_Temp16
+    lda #$00
+    sta var_Temp16 + 1
+    jsr ft_period_remove
+
+.if 0
 	sec
 	lda var_ch_TimerPeriodLo, x
 	sbc var_ch_EffParam, x
@@ -225,19 +288,26 @@ ft_portamento:
 	lda var_ch_TimerPeriodHi, x
 	sbc #$00
 	sta var_ch_TimerPeriodHi, x
-	; Check if sign bit has changed, if so load the desired frequency
-	lda var_ch_TimerPeriodHi, x			; Compare high byte
+.endif
+	; Check if sign bit has changed, if so load the desired period
+;	lda var_ch_TimerPeriodHi, x			; Compare high byte
 	cmp var_ch_PortaToHi, x
-	bcc @LoadFrequency
-	bmi @LoadFrequency
+	bcc @LoadPeriod
+	bmi @LoadPeriod
 	bne @NoPortamento
 	lda var_ch_TimerPeriodLo, x						; Compare low byte
 	cmp var_ch_PortaToLo, x
-	bcc @LoadFrequency
+	bcc @LoadPeriod
 ;	rts												; Portamento is done at this point
 	jmp ft_post_effects
 
-@Increase:											; Increase frequency
+@Increase:											; Increase period
+    lda var_ch_EffParam, x
+    sta var_Temp16
+    lda #$00
+    sta var_Temp16 + 1
+    jsr ft_period_add
+.if 0
 	clc
 	lda var_ch_TimerPeriodLo, x
 	adc var_ch_EffParam, x
@@ -245,18 +315,19 @@ ft_portamento:
 	lda var_ch_TimerPeriodHi, x
 	adc #$00
 	sta var_ch_TimerPeriodHi, x
-	; Check if sign bit has changed, if so load the desired frequency
+.endif
+	; Check if sign bit has changed, if so load the desired period
 	lda var_ch_PortaToHi, x							; Compare high byte
 	cmp var_ch_TimerPeriodHi, x
-	bcc @LoadFrequency
+	bcc @LoadPeriod
 	bne @NoPortamento
 	lda var_ch_PortaToLo, x							; Compare low byte
 	cmp var_ch_TimerPeriodLo, x
-	bcc @LoadFrequency
+	bcc @LoadPeriod
 ;	rts
 	jmp ft_post_effects
 
-@LoadFrequency:										; Load the correct frequency
+@LoadPeriod:										; Load the correct period
 	lda var_ch_PortaToLo, x
 	sta var_ch_TimerPeriodLo, x
 	lda var_ch_PortaToHi, x
@@ -265,26 +336,71 @@ ft_portamento:
 	jmp ft_post_effects
 
 ft_portamento_up:
-	sec
-	lda var_ch_TimerPeriodLo, x
-	sbc var_ch_EffParam, x
-	sta var_ch_TimerPeriodLo, x
-	lda var_ch_TimerPeriodHi, x
-	sbc #$00
-	sta var_ch_TimerPeriodHi, x
+    lda var_ch_EffParam, x
+    sta var_Temp16
+    lda #$00
+    sta var_Temp16 + 1
+    jsr ft_period_remove
 	jsr ft_limit_freq
 	jmp ft_post_effects
 ft_portamento_down:
-	clc
-	lda var_ch_TimerPeriodLo, x
-	adc var_ch_EffParam, x
-	sta var_ch_TimerPeriodLo, x
-	lda var_ch_TimerPeriodHi, x
-	adc #$00
-	sta var_ch_TimerPeriodHi, x	
+    lda var_ch_EffParam, x
+    sta var_Temp16
+    lda #$00
+    sta var_Temp16 + 1
+    jsr ft_period_add
 	jsr ft_limit_freq
 	jmp ft_post_effects
-	
+
+ft_period_add:
+.ifdef USE_N163
+    lda ft_channel_type, x
+    cmp #CHAN_N163
+    bne :+
+    ; Multiply by 4
+    asl var_Temp16
+    rol var_Temp16 + 1
+    asl var_Temp16
+    rol var_Temp16 + 1
+:
+.endif
+	clc
+	lda var_ch_TimerPeriodLo, x
+	adc var_Temp16
+	sta var_ch_TimerPeriodLo, x
+	lda var_ch_TimerPeriodHi, x
+	adc var_Temp16 + 1
+	sta var_ch_TimerPeriodHi, x
+	bcc :+                           ; Do not wrap
+	lda #$FF
+	sta var_ch_TimerPeriodLo, x
+	sta var_ch_TimerPeriodHi, x
+:   rts
+ft_period_remove:
+.ifdef USE_N163
+    lda ft_channel_type, x
+    cmp #CHAN_N163
+    bne :+
+    ; Multiply by 4
+    asl var_Temp16
+    rol var_Temp16 + 1
+    asl var_Temp16
+    rol var_Temp16 + 1
+:
+.endif
+	sec
+	lda var_ch_TimerPeriodLo, x
+	sbc var_Temp16
+	sta var_ch_TimerPeriodLo, x
+	lda var_ch_TimerPeriodHi, x
+	sbc var_Temp16 + 1
+	sta var_ch_TimerPeriodHi, x
+	bcs :+                           ; Do not wrap
+	lda #$00
+	sta var_ch_TimerPeriodLo, x
+	sta var_ch_TimerPeriodHi, x
+:   rts
+
 ;
 ; Note slide
 ;
@@ -296,13 +412,15 @@ ft_slide_up:
 	lda var_ch_TimerPeriodHi, x
 	sbc #$00
 	sta var_ch_TimerPeriodHi, x
-	cmp var_ch_PortaToHi, x			; Compare high byte
+
+	cmp var_ch_PortaToHi, x			    ; Compare high byte
 	bcc ft_slide_done
 	bne ft_slide_not_done
 	lda var_ch_TimerPeriodLo, x
-	cmp var_ch_PortaToLo, x						; Compare low byte
+	cmp var_ch_PortaToLo, x				; Compare low byte
 	bcc ft_slide_done
 	jmp ft_post_effects
+
 ft_slide_down:
 	clc
 	lda var_ch_TimerPeriodLo, x
@@ -311,20 +429,24 @@ ft_slide_down:
 	lda var_ch_TimerPeriodHi, x
 	adc #$00
 	sta var_ch_TimerPeriodHi, x
-	cmp var_ch_PortaToHi, x			; Compare high byte
+
+	cmp var_ch_PortaToHi, x			    ; Compare high byte
 	bcc ft_slide_not_done
 	bne ft_slide_done
 	lda var_ch_TimerPeriodLo, x
-	cmp var_ch_PortaToLo, x						; Compare low byte
+	cmp var_ch_PortaToLo, x				; Compare low byte
 	bcs ft_slide_done
 	jmp ft_post_effects
+
 ft_slide_done:
 	lda var_ch_PortaToLo, x
 	sta var_ch_TimerPeriodLo, x
 	lda var_ch_PortaToHi, x
 	sta var_ch_TimerPeriodHi, x
-	lda #EFF_NONE								; Reset effect
+
+	lda #EFF_NONE						; Reset effect
 	sta var_ch_Effect, x
+
 ft_slide_not_done:
 	jmp ft_post_effects
 
@@ -337,11 +459,11 @@ ft_arpeggio:
 	beq @LoadSecond
 	cmp #$02
 	beq @LoadThird
-	lda var_ch_Note, x							; Load first note
+	lda var_ch_Note, x					; Load first note
 	jsr ft_translate_freq_only
 	inc var_ch_ArpeggioCycle, x
 	jmp ft_post_effects
-@LoadSecond:									; Second note (second nybble)
+@LoadSecond:							; Second note (second nybble)
 	lda var_ch_EffParam, x
 	lsr a
 	lsr a
@@ -363,7 +485,7 @@ ft_arpeggio:
 	and #$0F
 	clc
 	adc var_ch_Note, x
-	jsr ft_translate_freq_only	
+	jsr ft_translate_freq_only
 	lda #$00
 	sta var_ch_ArpeggioCycle, x
 	jmp ft_post_effects
@@ -384,26 +506,19 @@ ft_vibrato:
 	bcc @Phase2
 	cmp #$30
 	bcc @Phase3
-	; Phase 4
-	; - 15 - (Phase - 48) + depth
+	; Phase 4: - 15 - (Phase - 48) + depth
 	sec
 	sbc #$30
 	sta var_Temp
 	sec
 	lda #$0F
 	sbc var_Temp
-	;and #$0F
 	ora var_ch_VibratoDepth, x
 	tay
 	lda ft_vibrato_table, y
-;	eor #$FF
-;	sta var_Temp16
-;	lda #$FF
-;	sta var_Temp16 + 1
 	jmp @Negate
 @Phase1:
-    ; Phase 1
-	; Phase + depth
+	; Phase 1: Phase + depth
 	ora var_ch_VibratoDepth, x
 	tay
 	lda ft_vibrato_table, y
@@ -412,8 +527,7 @@ ft_vibrato:
 	sta var_Temp16 + 1
 	jmp @Calculate
 @Phase2:
-    ; Phase 2
-	; 15 - (Phase - 16) + depth
+	; Phase 2: 15 - (Phase - 16) + depth
 	sec
 	sbc #$10
 	sta var_Temp
@@ -428,8 +542,7 @@ ft_vibrato:
 	sta var_Temp16 + 1
 	jmp @Calculate
 @Phase3:
-    ; Phase 3
-	; - (Phase - 32) + depth
+	; Phase 3: - (Phase - 32) + depth
 	sec
 	sbc #$20
 	ora var_ch_VibratoDepth, x
@@ -437,6 +550,7 @@ ft_vibrato:
 	lda ft_vibrato_table, y
 
 @Negate:
+    ; Invert result
 	eor #$FF
 	sta var_Temp16
 	lda #$FF
@@ -471,6 +585,23 @@ ft_vibrato:
 	lsr var_Temp16 + 1			; divide by 2
 	ror var_Temp16
 :
+
+.ifdef USE_N163
+    lda ft_channel_type, x
+    cmp #CHAN_N163
+    bne @SkipN163
+    asl var_Temp16        ; Multiply by 16
+    rol var_Temp16 + 1
+    asl var_Temp16
+    rol var_Temp16 + 1
+    asl var_Temp16
+    rol var_Temp16 + 1
+    asl var_Temp16
+    rol var_Temp16 + 1
+@SkipN163:   ; if (ft_channel_type, x != CHAN_N163)
+.endif
+
+      ; TODO use ft_period_remove
 	sec
 	lda var_ch_PeriodCalcLo, x
 	sbc var_Temp16
@@ -478,16 +609,19 @@ ft_vibrato:
 	lda var_ch_PeriodCalcHi, x
 	sbc var_Temp16 + 1
 	sta var_ch_PeriodCalcHi, x
+
 	rts
-	
-	
+
+
 ; Tremolo calculation
 ;
 ft_tremolo:
 	lda var_ch_TremoloSpeed, x
 	bne @DoTremolo
-	lda var_ch_Volume, x
-	sta var_ch_OutVolume, x
+;	lda var_ch_Volume, x
+;	sta var_ch_OutVolume, x
+    lda #$00
+    sta var_ch_TremoloResult, x
 	rts
 @DoTremolo:
 	clc
@@ -506,7 +640,7 @@ ft_tremolo:
 	lda #$0F
 	sbc var_Temp
 	ora var_ch_TremoloDepth, x
-	tay 
+	tay
 	lda ft_vibrato_table, y
 	lsr a
 	sta var_Temp
@@ -519,6 +653,8 @@ ft_tremolo:
 	lsr a
 	sta var_Temp
 @Calculate:
+    sta var_ch_TremoloResult, x
+.if 0
 	sec
 	lda var_ch_Volume, x
 	sbc var_Temp
@@ -527,5 +663,6 @@ ft_tremolo:
 	rts
 :	lda #$00
 	sta var_ch_OutVolume, x
+.endif
 	rts
-	
+

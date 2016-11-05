@@ -98,7 +98,7 @@ ft_play_sfx:
 ;	lda var_sfx_notes, x
 ;	lda #$30
 ;	sta var_ch_Note, x
-	jsr ft_update_channel
+	jsr ft_run_instrument
 
 	pla
 	tax
@@ -122,16 +122,16 @@ ft_play_sfx:
 	ora ft_duty_table, x
 	ora #$30
 	sta $4000
-	lda var_ch_TimerPeriod + WAVE_CHANS
+	lda var_ch_TimerPeriodLo
 	sta $4002
-	lda var_ch_TimerPeriod + SFX_WAVE_CHANS + WAVE_CHANS
+	lda var_ch_TimerPeriodHi + SFX_WAVE_CHANS
 	cmp ft_sq_last
 	beq :+
 	sta $4003
 	sta ft_sq_last
 :
 	; Square 2
-	
+
 	lda var_sfx_durations + 1
 	beq :+
 	lda var_ch_Volume + WAVE_CHANS + 1
@@ -143,9 +143,9 @@ ft_play_sfx:
 	ora ft_duty_table, x
 	ora #$30
 	sta $4004
-	lda var_ch_TimerPeriod + WAVE_CHANS + 1
+	lda var_ch_TimerPeriodLo + 1
 	sta $4006
-	lda var_ch_TimerPeriod + SFX_WAVE_CHANS + WAVE_CHANS + 1
+	lda var_ch_TimerPeriodHi + SFX_WAVE_CHANS + 1
 	cmp ft_sq_last + 1
 	beq :+
 	sta $4007
@@ -166,11 +166,11 @@ ft_play_sfx:
 	sta $2007
 	lda #$00
 	sta $2007
-	lda var_ch_TimerPeriod + WAVE_CHANS + 1
+	lda var_ch_TimerPeriodLo + 1
 	sta $2007
 	lda #$00
 	sta $2007
-	lda var_ch_TimerPeriod + SFX_WAVE_CHANS + WAVE_CHANS + 1
+	lda var_ch_TimerPeriodHi + SFX_WAVE_CHANS + 1
 	sta $2007
 
 	rts

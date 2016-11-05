@@ -25,7 +25,7 @@
 .byte 4
 .elseif .defined(USE_MMC5)
 .byte 8
-.elseif .defined(USE_N106)
+.elseif .defined(USE_N163)
 .byte 16
 .elseif .defined(USE_5B)
 .byte 32

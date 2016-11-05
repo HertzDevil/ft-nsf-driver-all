@@ -3,7 +3,7 @@
 ;
 
 .if 0
-; Found this on nesdev bbs by blargg, 
+; Found this on nesdev bbs by blargg,
 ; this can replace the volume table but takes a little more CPU
 ft_get_volume:
 
@@ -12,7 +12,7 @@ ft_get_volume:
 	lsr a
 	lsr a
 	sta var_Temp
-	lda var_ch_OutVolume, x
+	lda var_ch_Volume, x
 	sta var_Temp2
 
     lda var_Temp				; 4x4 multiplication
@@ -34,7 +34,7 @@ ft_get_volume:
 	beq :+
 	rts
 :	lda var_Temp
-	ora var_ch_OutVolume, x
+	ora var_ch_Volume, x
 	beq :+
 	lda #$01					; Round up to 1
 :	rts
@@ -73,18 +73,24 @@ ft_update_apu:
 .endif
 	; Calculate volume
 	lda var_ch_VolColumn + 0		; Kill channel if volume column = 0
+
 	asl a
 	and #$F0
 	beq @KillSquare1
 	sta var_Temp
-	lda var_ch_OutVolume + 0
+	lda var_ch_Volume + 0
 	beq @KillSquare1
 	ora var_Temp
 	tax
 	lda ft_volume_table, x
+    sec
+    sbc var_ch_TremoloResult
+    bpl :+
+    lda #$00
+:
 
 	; Write to registers
-	pha 
+	pha
 	lda var_ch_DutyCycle
 	and #$03
 	tax
@@ -101,7 +107,7 @@ ft_update_apu:
 	lda #$FF
 	sta var_ch_PeriodCalcLo
 @TimerOverflow1:
-	
+
 	lda var_ch_Sweep 			; Check if sweep is active
 	beq @NoSquare1Sweep
 	and #$80
@@ -127,7 +133,7 @@ ft_update_apu:
 	lda #$30
 	sta $4000
 	jmp @Square2
-	
+
 @NoSquare1Sweep:				; No Sweep
 	lda #$08
 	sta $4001
@@ -160,15 +166,31 @@ ft_update_apu:
 	.if 1
 	; Calculate volume
 	lda var_ch_VolColumn + 1		; Kill channel if volume column = 0
+
 	asl a
 	and #$F0
-	beq @KillSquare2
+;	beq @KillSquare2
+
+	bne :+
+    jmp @KillSquare2
+    :
+
 	sta var_Temp
-	lda var_ch_OutVolume + 1
-	beq @KillSquare2
+	lda var_ch_Volume + 1
+;	beq @KillSquare2
+
+    bne :+
+    jmp @KillSquare2
+    :
+
 	ora var_Temp
 	tax
 	lda ft_volume_table, x
+    sec
+    sbc var_ch_TremoloResult + 1
+    bpl :+
+    lda #$00
+:
 	.endif
 
 	.if 0
@@ -284,11 +306,16 @@ ft_update_apu:
 	and #$F0
 	sta var_Temp
 	beq @KillNoise
-	lda var_ch_OutVolume + 3
+	lda var_ch_Volume + 3
 	beq @KillNoise
 	ora var_Temp
 	tax
 	lda ft_volume_table, x
+    sec
+    sbc var_ch_TremoloResult + 3
+    bpl :+
+    lda #$00
+:
 	.endif
 ;	ldx #$03
 ;	jsr ft_get_volume
@@ -323,16 +350,24 @@ ft_update_apu:
 .ifdef USE_DPCM
 	lda var_Channels
 	and #$10
-	beq @Return
-
-	lda var_ch_DPCM_Retrig			; Retrigger
-	beq :+
-	dec var_ch_DPCM_RetrigCntr
 	bne :+
+	rts                             ; Skip DPCM
+	;beq @Return
+:   
+.ifdef USE_N163
+    ldx var_AllChannels
+    dex
+.else
+    ldx #DPCM_CHANNEL
+.endif
+	lda var_ch_DPCM_Retrig			; Retrigger
+	beq @SkipRetrigger
+	dec var_ch_DPCM_RetrigCntr
+	bne @SkipRetrigger
 	sta var_ch_DPCM_RetrigCntr
 	lda #$01
-	sta var_ch_Note + DPCM_CHANNEL
-:
+	sta var_ch_Note, x
+@SkipRetrigger:
 
 	lda var_ch_DPCMDAC				; See if delta counter should be updated
 	bmi @SkipDAC
@@ -341,7 +376,7 @@ ft_update_apu:
 	lda #$80						; Skip that later by storing a negative value
 	sta var_ch_DPCMDAC
 
-	lda var_ch_Note + DPCM_CHANNEL
+	lda var_ch_Note, x
 	beq @KillDPCM
 	bmi @SkipDPCM
 	lda var_ch_DPCM_EffPitch
@@ -351,11 +386,28 @@ ft_update_apu:
 	lda #$80
 	sta var_ch_DPCM_EffPitch
 
+	; Setup sample bank (if used)
+ .ifdef USE_BANKSWITCH
+	lda var_ch_SampleBank
+	beq :+
+	clc
+	sta $5FFC		; Always last bank
+	adc #$01
+	sta $5FFD
+	adc #$01
+	sta $5FFE
+	adc #$01
+	sta $5FFF
+:
+.endif
+
+	; Sample position (add sample offset)
 	clc
 	lda var_ch_SamplePtr
 	adc var_ch_DPCM_Offset
 	sta $4012
 
+	; Sample length (remove sample offset)
 	lda var_ch_DPCM_Offset
 	asl a
 	asl a
@@ -365,7 +417,7 @@ ft_update_apu:
 	sbc var_Temp
 	sta $4013
 	lda #$80
-	sta var_ch_Note + DPCM_CHANNEL
+	sta var_ch_Note, x
 	lda #$0F
 	sta $4015
 	lda #$1F
@@ -377,17 +429,17 @@ ft_update_apu:
 	rts
 @ReleaseDPCM:
 ; todo
-;	lda #$0F
-;	sta $4015
-;	lda #$80
-;	sta var_ch_Note + DPCM_CHANNEL
+	lda #$0F
+	sta $4015
+	lda #$80
+	sta var_ch_Note, x
 	rts
 @KillDPCM:
 	lda #$0F
 	sta $4015
 	lda #$80
 	sta $4011
-	sta var_ch_Note + DPCM_CHANNEL
+	sta var_ch_Note, x
 .endif
 @Return:
 	rts
@@ -401,12 +453,12 @@ ft_duty_table:
 ft_volume_table:
 	.byte 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 	.byte 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
-	.byte 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2 
- 	.byte 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3 
- 	.byte 0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 4 
- 	.byte 0, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5 
- 	.byte 0, 1, 1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4, 5, 5, 6 
- 	.byte 0, 1, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7 
+	.byte 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2
+ 	.byte 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3
+ 	.byte 0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 4
+ 	.byte 0, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5
+ 	.byte 0, 1, 1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4, 5, 5, 6
+ 	.byte 0, 1, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7
  	.byte 0, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 8 
  	.byte 0, 1, 1, 1, 2, 3, 3, 4, 4, 5, 6, 6, 7, 7, 8, 9 
  	.byte 0, 1, 1, 2, 2, 3, 4, 4, 5, 6, 6, 7, 8, 8, 9, 10 
